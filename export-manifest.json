@@ -28,7 +28,7 @@
     "common/tests/snapshot-roundtrip.sh": "538523ef385550714598bb7faa19cefe8f6417fddc69551883fb9fe6e7cdb374",
     "common/tests/test_allocation_health.py": "a6d2fb6ee3a7ae5d9c576df5f6293b18cc9727577e200c2d6407daf8504fc1e3",
     "common/tests/test_bundle_deploy.py": "9fb573d92aaa95aa8b3bc06b93568c80fa37ecc1a4ba7cf456fcb7da0c82d566",
-    "common/tests/test_profiles.py": "0c77aea731a58f7e110d2f17d4cd26fb05e6e81e198254bf5752503f81aa2c73",
+    "common/tests/test_profiles.py": "e57853efade32d84dbb42b4a9f80893b1c1fe6e61f855893a3b8b79e605ffdb0",
     "common/tests/test_shim_exec.py": "3c33cf925c65b96d12350f34e015f325909c5772ea2b58dce2a78cd8300049e4",
     "common/tests/test_workspace.py": "26548fb7591c8c0a9e7d8d43a33b6891d6bdaa7a6221d0b98612ed92a6a071b0",
     "docs/msi-persistent-ssh.md": "c399410df6cd203cfc6c2635998621fa3bd6d8ba370ac72a8debb4f0509ee9e3",

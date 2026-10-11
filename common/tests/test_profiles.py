@@ -133,7 +133,12 @@ class ProfileTests(unittest.TestCase):
                 body = body.replace('/usr/bin/salloc', str(fake / 'salloc')).replace('/usr/bin/srun', str(fake / 'srun'))
                 path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(body); path.chmod(0o700)
             prefix = data['name'].upper().replace('-', '_'); socket = data['name'] + '-login'
-            env = dict(os.environ, HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],
+            # Model the installed config location inside a private fixture HOME.
+            # tmux 3.2 opens a startup error mode when an explicit -f is absent.
+            login_config = root / '.config' / (data['name'] + '-gpu') / 'tmux.login.conf'
+            login_config.parent.mkdir(parents=True)
+            login_config.write_text((root / 'config/tmux.login.conf').read_text())
+            env = dict(os.environ, HOME=str(root), HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],
                        **{prefix + '_GPU_CONFIG': str(root / 'config/gpu.env'), prefix + '_GPU_STATE_DIR': str(root / 'state')})
             try:
                 result = subprocess.run(['bash', str(root / 'bin' / (data['name'] + '-gpu')), '--request', 'stable',
