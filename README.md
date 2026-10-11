@@ -111,6 +111,7 @@ zstd, flock and GNU tools on login and compute nodes. See
 - [Site probing](skills/hpc-workflow/references/site-probing.md): connection, resources, storage and toolchain evidence.
 - [Persistent SSH](docs/msi-persistent-ssh.md): MSI and adaptable jump-host routes.
 - [Operations](docs/usage.md): components, deployment, commands, health and rollback.
+- [Operating lessons](skills/hpc-workflow/references/operations.md): tmux namespaces, desktop arguments, CUDA/worker environments and job completion.
 - [Acceptance](skills/hpc-workflow/references/acceptance.md) and [verification record](docs/verification.md): what has been checked and how to verify a new site.
 - [Recovery](skills/hpc-workflow/references/recovery.md): failure-specific actions.
 - [Related tools](docs/related-tools.md): other HPC clients, interfaces and skill collections.

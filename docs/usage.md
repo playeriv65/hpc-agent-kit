@@ -95,6 +95,16 @@ compute nodes. The current allocation backends require Slurm `salloc` plus a
 bootstrap `srun --pty`, and permitted compute access through an implemented
 adapter. Batch-only `sbatch` sites require a new allocation backend.
 
+## Boundaries of the public bundle
+
+The public bundle provides remote helpers and the agent adaptation workflow.
+The reference site's complete Windows `msi`/`psc` wrappers, PSC browsable mirror,
+experiment recipe controller and MSI CUDA toolkit materializer are not exported.
+Generated profiles do not configure every model/JIT cache or supply a universal
+quota provider. Repository/site launchers still own that configuration.
+See [operating lessons](../skills/hpc-workflow/references/operations.md) for the
+practical decisions behind these boundaries and the required compute probes.
+
 ## Maintaining the repository
 
 Maintain both README languages together and keep `AGENTS.md` / `CLAUDE.md`

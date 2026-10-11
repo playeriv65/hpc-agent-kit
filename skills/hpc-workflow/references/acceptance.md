@@ -6,12 +6,18 @@ bytes, commands and logs so the result can be reproduced.
 
 1. Prove identity, supported authentication reuse and scheduler observation.
    A failed scheduler query must remain unknown, not become an empty queue.
+   For a desktop wrapper, check literal shell syntax, spaces, Unicode, a quoted
+   comma-containing argument, `run`'s `--` marker, exit status and a staged script
+   larger than the desktop argument limit. Verify bytes through the actual route.
 2. Submit one stable allocation request; replay it concurrently and after a
    connection interruption. Prove one Slurm job with matching owner/comment.
    Changed parameters and unrelated existing jobs must refuse another submission.
 3. On a granted node, prove restore/verification, initial autosave readiness,
    current-writer health and persistent archive placement. Check a login-node
    observer cannot obtain the compute writer's lease.
+   Prove the selected tmux namespace, actual disk mount/cache locations and
+   application readiness through its launcher. A normal backup doctor does not
+   check framework imports, CUDA compilation or worker environment inheritance.
 4. Write/change/delete synthetic files, save and restore. Exercise corruption
    fallback, interrupted publication and retention with isolated fixture packs.
    Confirm `.venv` and large cache exclusions without using research checkpoints.

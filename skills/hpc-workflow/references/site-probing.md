@@ -23,6 +23,9 @@ Example read-only inventory: `hostname`, `id`, `squeue -u "$USER"`,
 `scontrol show partition`, `sinfo -N`, `sacctmgr show assoc where user="$USER"`.
 Use supported cluster commands/CLI, rather than creating a parallel connection
 route. Sites can restrict accounting visibility; record that limitation explicitly.
+For desktop arguments, allocated tmux namespaces and compute environment probes,
+read [operating lessons](operations.md). Shared home and the same hostname do not
+establish that two connections see the same process or socket context.
 
 Inspect allocated GPU TRES as well as CPU availability; a mixed node can have all
 GPUs occupied, and a drained node's unused GPUs cannot accept new work. Recheck

@@ -70,6 +70,9 @@ Use `SITE-gpu run --job JOB_ID --request TASK_ID --wait WINDOW -- COMMAND ...`
 for experiments after bootstrap. A repeated task ID must retain the same job,
 window and literal command. Do not create extra `srun` steps for ordinary work.
 Use the repository's launcher to recreate environments and apply its toolchain.
+Read [operating lessons](references/operations.md) when adapting desktop wrappers,
+preparing an application's environment/caches or observing a job through its end.
+It covers allocation namespaces, argument transport and workload readiness.
 
 `SITE-agent-state status` reports queue, routes and allocation records.
 `SITE-agent-state doctor` also checks current compute access, autosave process

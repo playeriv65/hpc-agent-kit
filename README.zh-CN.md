@@ -102,6 +102,7 @@ GNU 工具。详见[运行条件与操作说明](docs/usage.md)。
 - [站点探测](skills/hpc-workflow/references/site-probing.md)：连接、资源、存储和工具链的证据要求。
 - [持久 SSH](docs/msi-persistent-ssh.md)：MSI 与可适配的跳板连接方式。
 - [操作说明](docs/usage.md)：组件、部署、命令、健康检查和回滚。
+- [实际使用经验](skills/hpc-workflow/references/operations.md)：tmux 命名空间、桌面参数、CUDA/子进程环境与任务收尾。
 - [验收步骤](skills/hpc-workflow/references/acceptance.md)与[验收记录](docs/verification.md)：已经验证什么，以及如何验证新站点。
 - [恢复说明](skills/hpc-workflow/references/recovery.md)：不同故障的处理方式。
 - [相关工具](docs/related-tools.md)：其他 HPC 客户端、交互界面和 skill 集合。

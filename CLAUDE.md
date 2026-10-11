@@ -30,6 +30,9 @@ grants. Validate compute capabilities on compute, not only on login nodes.
   reservation must not produce another allocation or deletion of its record.
 - Use stable task IDs and named windows. Inspect durable logs and completion
   records; a historical READY or running marker is not a current health check.
+- Use the allocated route and repository launcher. Shared home/hostnames do not
+  prove socket access; backup readiness does not prove application readiness.
+  If a job leaves the queue, establish its terminal outcome with accounting.
 - Use disk-backed, job-isolated local storage for environments and caches, and
   persistent storage for snapshots, results and complete checkpoints. Restore
   verifies before extraction; `.venv` is recreated with `uv sync --locked`.
@@ -41,6 +44,8 @@ grants. Validate compute capabilities on compute, not only on login nodes.
   exact prior installation; inspect `deployment.json` after interruptions.
 
 Read `skills/hpc-workflow/references/recovery.md` for failure-specific actions.
+Read `skills/hpc-workflow/references/operations.md` for desktop transports,
+compute environments, storage budgets and scoped job observation.
 Preserve research jobs, uncertain records, archives and failure evidence. Do not
 cancel unrelated work, overwrite checkpoints, retry MFA automatically or replace
 a healthy transport. A user's setup/repair request authorizes ordinary scoped
