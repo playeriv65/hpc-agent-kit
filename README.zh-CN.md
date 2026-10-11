@@ -2,137 +2,118 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-供 Agent 在 **基于 Slurm 的 Linux HPC 集群**上建立 GPU 工作环境的通用工具和
-skill：持久连接、嵌套 tmux、持久资源申请 ID、作业本地工作目录，以及经过校验的
-自动备份与恢复。
+**让 coding agent 用上可持续连接、自动恢复的 Slurm GPU 工作环境。**
 
-**MSI 和 PSC Bridges-2 是已经验证过的参考站点。** 通用核心通过私有站点 profile
-配置；Agent 根据其他 Slurm 集群的实际情况适配连接、资源规则和存储路径。
+把这个仓库和 HPC 访问方式交给 Agent。它会按站点实际情况适配连接和配置，建立
+嵌套 tmux，并在新的资源申请获批后恢复经过校验的工作目录备份。
 
-仓库：[playeriv65/hpc-agent-kit](https://github.com/playeriv65/hpc-agent-kit)。
-获取配套发布版本或克隆仓库，再把路径交给 Agent：
+[开始使用](#开始使用) · [工作流程](#工作流程) · [兼容性](#兼容性) · [文档导航](#文档导航)
+
+## 它能帮你做什么？
+
+- 桌面断线后，仍在有效期内的远程作业和任务继续运行。
+- 代码、环境和缓存放在高速作业本地磁盘上，减少 home 占用。
+- 作业启动时恢复经过校验的快照，运行期间自动保存。
+- 断线后复用申请 ID 和任务 ID，避免重复申请、重复启动任务。
+- 需要交互登录时，让普通命令复用健康的已认证 SSH 连接。
+
+Agent 留在你自己的机器上；HPC 运行远程辅助脚本和任务。`AGENTS.md` 与 `CLAUDE.md`
+提供相同的操作契约。
+
+## 开始使用
+
+克隆仓库，或者让 Agent 获取它：
 
 ```sh
 git clone https://github.com/playeriv65/hpc-agent-kit.git
 ```
 
-把仓库和这样的需求交给 Agent：
+把本地仓库路径和下面的提示词交给 coding agent。将占位符替换为你的集群名称或
+已有 SSH 别名：
 
-> 我有一个使用 Slurm 的 HPC。请根据这个仓库，为我建立并验证连接和 GPU 工作环境。
-> 先检查现有登录方式、作业和存储，再按这个站点的实际情况配置。
+```text
+请根据 https://github.com/playeriv65/hpc-agent-kit 为我建立 Slurm HPC 工作流程。
+我的集群是：[集群名称或 SSH 别名]。
+先阅读 AGENTS.md 和 skills/hpc-workflow/SKILL.md，再检查现有连接、作业、资源权限
+和存储。按实际情况建立私有站点 profile，部署辅助脚本，并验证工作环境、自动备份
+和恢复。保留我现有的作业和数据；缺少访问资料或需要交互认证时再向我询问。
+```
 
-`AGENTS.md` 和 `CLAUDE.md` 包含相同的操作契约。Agent 读取
-[`skills/hpc-workflow/SKILL.md`](skills/hpc-workflow/SKILL.md)，探测实际站点，编写
-私有 profile，生成部署包，再通过已有的认证连接部署。无需人工初始化向导。
+Agent 负责探测站点、生成部署包并验证安装后的工作流程。完整步骤见
+[skill](skills/hpc-workflow/SKILL.md)。单独安装 skill 时，需要取得与之匹配的完整仓库。
 
-## 持久 SSH 与跳板
+建立环境后，命令采用下面的形式。`SITE`、GPU 类型、作业 ID 和命令根据实际安装
+与项目填写：
 
-MSI 或其他使用交互认证的连接方式，参见
-[持久 SSH 与跳板指南](docs/msi-persistent-ssh.md)。指南说明了如何让常开主机持有
-已认证连接、如何让普通命令复用连接而不重新发起 MFA，以及如何处理通道饱和或在
-连接真正断开后恢复。
+```sh
+SITE-gpu --request allocation-001 GPU_TYPE 1 01:00:00
+SITE-gpu allocation allocation-001
+SITE-gpu run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-agent-state doctor --verify-backup
+```
 
-## Slurm 兼容性与站点适配
+## 工作流程
 
-调度系统叫 **Slurm**。它的命令包括用于提交批作业的
-[`sbatch`](https://slurm.schedmd.com/sbatch.html)、用于申请资源的
-[`salloc`](https://slurm.schedmd.com/salloc.html)，以及用于运行作业步骤的
-[`srun`](https://slurm.schedmd.com/srun.html)。当前工作环境后端在登录节点 tmux 中
-保留 `salloc`，通过一次启动用的 `srun --pty` 建立计算节点 tmux；之后的普通任务
-交给本工具的任务执行器。
+```mermaid
+flowchart LR
+    A["本地 coding agent"] --> L["登录节点 tmux<br/>control + 资源申请"]
+    L --> C["计算节点 tmux<br/>setup + autosave + 任务"]
+    C --> W["作业本地工作目录<br/>代码 + 缓存"]
+    W -->|"校验后保存快照"| P["持久备份存储"]
+    P -->|"下次资源申请后恢复"| W
+```
 
-| 站点或条件 | 当前支持情况 |
+登录会话持有 Slurm 资源申请；每个作业有自己的计算节点 tmux 和具名任务窗口。
+启动时恢复经过校验的快照，并开启定期保存。默认每五分钟增量保存、每六小时全量
+合并，并在作业截止前保存。最新代次损坏时，回退到已经验证的前序备份。
+环境通过 `uv sync --locked` 重建。
+
+需要交互认证时，常开跳板可以在桌面关机后继续持有健康的 SSH master。
+[持久 SSH 指南](docs/msi-persistent-ssh.md)说明了认证负责人、连接复用、通道饱和
+和恢复方式。
+
+会话仍受 Slurm walltime 限制。节点突然丢失时，只能恢复已提交的备份。实验结果
+和完整 checkpoint 应写到持久存储；恢复工作目录本身不等于恢复实验进度。
+
+## 兼容性
+
+通用核心面向 Linux 上的 Slurm。**MSI 和 PSC Bridges-2 是已经验证的参考站点**，
+具体版本与验证范围见[验收记录](docs/verification.md)。其他 Slurm 站点由 Agent
+通过私有 profile 适配，再完成本站验收。
+
+| 连接方式或配置 | 支持情况 |
 | --- | --- |
-| MSI | 已验证的参考部署：持有已认证 SSH 连接，并直接 SSH 到获配的计算节点。 |
-| PSC Bridges-2 | 已验证的参考部署：通过资源申请终端与 tmux 桥接访问计算节点。 |
-| 其他 Slurm Linux 集群 | 适配私有站点 profile 并完成本站验收。允许且已经验证登录节点到获配计算节点 SSH 时，使用 `direct-ssh`。 |
-| 通过资源申请终端访问计算节点 | `psc-bridge` 实现了 PSC 的连接方式；其他站点的终端行为需要适配和测试。 |
-| 只允许 `sbatch` 的站点 | 需要适配资源申请后端；当前发布版本没有批作业专用后端。 |
+| 从登录节点 SSH 到获配计算节点 | 使用 `direct-ssh` 适配器；需确认站点允许且计算节点访问已验证。 |
+| PSC 资源申请终端与 tmux 桥接 | 使用 `psc-bridge` 适配器；其他站点的终端行为需要适配。 |
+| 账号、分区、QoS、GPU GRES 与存储路径 | 根据实际探测配置；[MSI](examples/msi.example.json)和 [PSC](examples/psc.example.json)是模板。 |
+| 只允许批作业的 Slurm 站点 | 需要资源申请后端；当前后端使用 `salloc` + 启动用的 `srun --pty`。 |
 | 其他调度系统 | 需要对应的调度器适配器。 |
 
-Agent 需要确认登录路径、认证负责人、账号、分区与 QoS 权限、GPU GRES 名称、
-资源限制、作业本地磁盘、持久备份位置，以及实际项目的工具链。参见
-[站点探测说明](skills/hpc-workflow/references/site-probing.md)和
-[MSI](examples/msi.example.json) / [PSC](examples/psc.example.json) profile 模板。
-模板中的账号、路径和编译器选择属于站点实例。
+[`sbatch`](https://slurm.schedmd.com/sbatch.html)、
+[`salloc`](https://slurm.schedmd.com/salloc.html)和
+[`srun`](https://slurm.schedmd.com/srun.html)都是 Slurm 命令；是否可用以及允许怎样使用，
+取决于站点规则。本地工具使用 uv 和 Python 3.12+，支持 Windows 和 Linux。远程
+脚本要求登录、计算节点具备 Bash 4+、Python 3.6+、tmux、GNU tar、zstd、flock 和
+GNU 工具。详见[运行条件与操作说明](docs/usage.md)。
 
-## Agent 工具与部署后的命令
+## 文档导航
 
-| 组件 | 用途 |
-| --- | --- |
-| `common/profile.py` | 校验提供的站点事实，生成独立部署包。 |
-| `common/allocation.py` | 在 tmux 派发前持久化申请 ID；通过 Slurm 作业所属用户和 comment 找回申请。 |
-| `common/task-runner.sh` | 对具名实验命令去重，保留输出和退出状态。 |
-| `common/local-snapshot.sh` | 恢复、校验、自动保存、合并并保留不可变备份代次。 |
-| `common/agent-state.py`、`common/health.py` | 区分队列观察、当前进程健康和归档完整性检查。 |
-| `common/deploy_bundle.py` | 固定部署内容，确认系统处于可升级状态，保留旧文件，安装并在失败时回滚。 |
+- [Agent skill](skills/hpc-workflow/SKILL.md)：建立、使用与恢复站点环境。
+- [站点探测](skills/hpc-workflow/references/site-probing.md)：连接、资源、存储和工具链的证据要求。
+- [持久 SSH](docs/msi-persistent-ssh.md)：MSI 与可适配的跳板连接方式。
+- [操作说明](docs/usage.md)：组件、部署、命令、健康检查和回滚。
+- [验收步骤](skills/hpc-workflow/references/acceptance.md)与[验收记录](docs/verification.md)：已经验证什么，以及如何验证新站点。
+- [恢复说明](skills/hpc-workflow/references/recovery.md)：不同故障的处理方式。
+- [相关工具](docs/related-tools.md)：其他 HPC 客户端、交互界面和 skill 集合。
 
-`direct-ssh` 适配器使用登录节点到计算节点的 SSH。`psc-bridge` 使用 PSC 的资源
-申请终端与 tmux 桥接。两者都是模板：Agent 必须确认站点规则、存储和允许的 QoS，
-再将相关事实标为已验证。生成器会拒绝未填写的示例账号和连接路径。框架与 CUDA
-配置由明确的项目或站点启动脚本负责。
+## 在你的集群上试试
 
-Agent 使用的工具命令：
+正在适配另一个 Slurm 站点？欢迎[提交 issue](https://github.com/playeriv65/hpc-agent-kit/issues/new/choose)，
+说明连接方式、资源申请规则和存储布局。站点试用报告、适配器修复和更清楚的操作
+说明都很有帮助。公开报告不要包含私有 profile、认证材料、研究数据或原始日志。
 
-```sh
-uv run python common/profile.py private/site.json --output outputs/site-bundle
-uv run python common/deploy_bundle.py outputs/site-bundle
-# When deployment is within the requested setup scope:
-uv run python common/deploy_bundle.py outputs/site-bundle --apply
-# Review or apply rollback to the exact backup reported by deployment:
-uv run python common/deploy_bundle.py outputs/site-bundle --rollback REMOTE_BACKUP
-uv run python common/deploy_bundle.py outputs/site-bundle --rollback REMOTE_BACKUP --apply
-```
-
-部署后，`SITE-gpu --request ID TYPE COUNT WALLTIME` 申请或复用资源，
-`SITE-gpu allocation ID` 找回申请状态。实验通过
-`SITE-gpu run --job JOB --request TASK --wait WINDOW -- COMMAND ...` 运行。
-`SITE-agent-state doctor` 检查当前写入者和保存的新鲜程度；
-`doctor --verify-backup` 进一步校验归档内容。健康检查记录一个独立任务，不改动实验。
-每项结果明确区分 `passed`、`failed`、`unknown` 和 `not_checked`。没有计算节点访问
-路径时，不能确认存储和自动保存健康。失败后遵循 skill 的
-[恢复说明](skills/hpc-workflow/references/recovery.md)。
-
-运行条件：Linux 上的 Slurm，支持直接 SSH 到获配计算节点或 PSC 终端桥接。
-本地 profile 与部署工具使用 uv 和 Python 3.12+，支持 Windows 和 Linux。
-远程脚本使用 Bash 4+、Python 3.6+、tmux、GNU tar、zstd、flock 和 GNU coreutils；
-需要在登录节点和计算节点分别探测。其他调度器和计算节点访问方式需要适配器。
-CUDA/GCC 由站点或项目启动脚本配置。单独安装 skill 时，需要取得与之匹配的完整仓库。
-
-## 验证与参考站点
-
-测试在 Linux 上使用真实 tmux、合成数据和模拟调度器：
-
-```sh
-uv run python -m unittest discover -s common/tests -v
-uv run python common/check_repo.py
-```
-
-这些测试不消耗 GPU。真实 GPU 验收是 skill 中独立、明确选择执行的流程。
-通用核心在 MSI 和 PSC 上开发；源站点验收不能替代新生成安装的本站验收。
-节点突然丢失时，只能恢复已经提交的备份。通过明确的实验选项，将 checkpoint 和
-结果写到持久存储。
-
-v0.3.1 在记录日志时保留资源申请的控制终端，包括 PSC 桥接中的终端，并在 PSC
-本地存储根目录 `/local` 下使用作业专属子目录。这些修正有 Linux 测试覆盖，并在
-2026-10-06 通过了真实 PSC 两次 V100 资源申请的生命周期验收：申请重放、在线备份
-健康与完整性、换节点自动恢复、当前写入者租约互斥，以及截止前备份。很小的归档
-可能触发增量体积阈值；此时成功的全量合并可以作为有效的截止前备份。MSI 源部署的
-两次资源申请测试使用 v0.3.0。接入新站点前，请执行 skill 中的真实验收。
-
-私有 profile、认证材料、研究数据和部署日志不应进入公开仓库。导出清单绑定本版本
-的文件内容，用于完整性校验，不是密码学签名。采用 MIT 许可证。
-
-0.4.0 增加了部署日志、失败自动回滚和显式回滚、检查覆盖情况、预期合并行为分类、
-一致的 Agent 契约，以及公开生成工作环境的回归测试。CI 在 Linux 上检查公开仓库，
-在 Windows 上检查文件清单与契约。上述 GPU 验收仍属于历史版本的证据，不代表新做
-了一次 v0.4.0 GPU 验收。
-
-## 贡献与隐私
-
-编辑开发仓库时，同步维护两个 README 语言版本和两个契约副本。有意修改文件后，
-用 `uv run python common/check_repo.py --refresh` 更新 `export-manifest.json` 中
-已有文件的哈希，再执行校验。新增受维护文件需显式加入清单；refresh 不会扫描私有
-目录。文本使用 `.gitattributes` 规定的 LF 换行，确保 Windows、Linux 的 Git 检出和
-发布归档保留相同的文件哈希。报告问题时使用 issue 模板中的脱敏版本、适配器、状态
-和错误字段；不要发布原始认证材料或完整私有任务日志。
+同步维护两个 README 语言版本和相同的 Agent 契约。文件清单检查和已有离线测试
+见[维护说明](docs/usage.md#maintaining-the-repository)。代码和发布包分别位于
+[本仓库](https://github.com/playeriv65/hpc-agent-kit)和
+[Releases](https://github.com/playeriv65/hpc-agent-kit/releases)。
+采用 [MIT](LICENSE) 许可证。

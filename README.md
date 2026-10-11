@@ -2,156 +2,129 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A reusable toolkit and skill for agents to establish GPU workspaces on
-**Slurm-based Linux HPC clusters**: persistent connections, nested tmux,
-durable allocation identities, job-local storage and verified automatic backup/restore.
+**Persistent Slurm GPU workspaces for coding agents.**
 
-**MSI and PSC Bridges-2 are verified reference sites.** The shared core is
-configured through private site profiles; agents adapt the connection, resource
-policy and storage paths for other Slurm clusters.
+Give your agent this repository and access to your HPC. It adapts the connection
+and site configuration, sets up nested tmux, and restores verified workspace
+backups when a new allocation starts.
 
-Repository: [playeriv65/hpc-agent-kit](https://github.com/playeriv65/hpc-agent-kit).
-Get a matching release or clone the repository, then give its path to your agent:
+[Quick start](#quick-start) · [Workflow](#how-it-works) · [Compatibility](#compatibility) · [Guides](#guides)
+
+## Why use it?
+
+- Keep remote work running through desktop disconnects while the allocation is alive.
+- Put code, environments and caches on fast, job-local disk instead of filling home.
+- Restore verified snapshots at bootstrap and autosave during the allocation.
+- Reuse allocation and task IDs after disconnects, avoiding duplicate work.
+- Reuse a healthy authenticated SSH connection on routes that require interactive login.
+
+The agent stays on your own machine. The HPC runs the remote helpers and your
+workloads. `AGENTS.md` and `CLAUDE.md` provide the same operating contract.
+
+## Quick start
+
+Clone the repository, or have your agent obtain it:
 
 ```sh
 git clone https://github.com/playeriv65/hpc-agent-kit.git
 ```
 
-Give your agent this checkout and a request such as:
+Give your coding agent the checkout path and this prompt. Replace the cluster
+placeholder with your cluster name or existing SSH alias:
 
-> I have access to a Slurm HPC cluster. Use this repository to establish and
-> verify a connection and GPU workspace workflow for my site. Inspect the
-> existing login route, jobs and storage first; adapt the site configuration.
-
-`AGENTS.md` and `CLAUDE.md` contain the
-same operating contract. The agent reads
-[`skills/hpc-workflow/SKILL.md`](skills/hpc-workflow/SKILL.md), probes the actual
-site, writes a private profile, renders a bundle and deploys through the existing
-authenticated route. There is no human initialization wizard.
-
-## Persistent SSH and jump hosts
-
-For MSI or other routes with interactive authentication, read the
-[persistent SSH and jump-host guide](docs/msi-persistent-ssh.md). It explains how
-an always-on host retains the authenticated connection, how ordinary calls reuse
-it without starting new MFA, and how to handle channel saturation or recover
-after a real disconnect.
-
-## Slurm compatibility and site adaptation
-
-The scheduler is **Slurm**. Its commands include
-[`sbatch`](https://slurm.schedmd.com/sbatch.html) for batch submission,
-[`salloc`](https://slurm.schedmd.com/salloc.html) for resource allocation and
-[`srun`](https://slurm.schedmd.com/srun.html) for running job steps.
-The current workspace backends retain `salloc` in login tmux and use one
-bootstrap `srun --pty` to establish compute tmux. Ordinary tasks then use the
-toolkit's task runner.
-
-| Site or requirement | Current support |
-| --- | --- |
-| MSI | Verified reference deployment with a retained authenticated SSH connection and direct allocated-node SSH. |
-| PSC Bridges-2 | Verified reference deployment with an allocation-terminal/tmux bridge. |
-| Other Slurm Linux clusters | Adapt a private site profile and perform site acceptance. Use `direct-ssh` when login-to-allocated-node SSH is permitted and verified. |
-| Compute access through an allocation terminal | The `psc-bridge` adapter implements the PSC route; another site's terminal behavior requires adaptation and tests. |
-| Sites allowing only `sbatch` | Require an allocation backend adaptation; a batch-only backend is not included in the current release. |
-| Other schedulers | Require a scheduler adapter. |
-
-The agent establishes the login route, authentication owner, account,
-partition/QoS permissions, GPU GRES names, resource limits, job-local disk,
-persistent archive location and repository toolchain. See
-[site probing](skills/hpc-workflow/references/site-probing.md) and the
-[MSI](examples/msi.example.json) / [PSC](examples/psc.example.json) profile
-templates. Their accounts, paths and compiler choices are site-specific examples.
-
-## Agent tooling and installed commands
-
-| Component | Purpose |
-| --- | --- |
-| `common/profile.py` | Validate supplied site facts and render a standalone bundle. |
-| `common/allocation.py` | Persist request identity before tmux dispatch; recover by Slurm owner/comment. |
-| `common/task-runner.sh` | Deduplicate named experiment commands and retain output/exit status. |
-| `common/local-snapshot.sh` | Restore, verify, autosave, compact and retain immutable generations. |
-| `common/agent-state.py`, `common/health.py` | Separate queue observations, current process health and archive integrity checks. |
-| `common/deploy_bundle.py` | Freeze bytes, check quiescent state, preserve prior files, install and roll back failures. |
-
-The `direct-ssh` adapter uses login-to-compute SSH. The `psc-bridge` adapter uses
-PSC's existing allocation-terminal/tmux bridge. Both are templates: the agent must
-establish site policy, storage and permitted QoS before marking facts verified.
-Unfilled example accounts/routes are intentionally rejected by the renderer.
-Framework/CUDA setup belongs to explicit repository or site launchers.
-
-For agent tooling:
-
-```sh
-uv run python common/profile.py private/site.json --output outputs/site-bundle
-uv run python common/deploy_bundle.py outputs/site-bundle
-# When deployment is within the requested setup scope:
-uv run python common/deploy_bundle.py outputs/site-bundle --apply
-# Review or apply rollback to the exact backup reported by deployment:
-uv run python common/deploy_bundle.py outputs/site-bundle --rollback REMOTE_BACKUP
-uv run python common/deploy_bundle.py outputs/site-bundle --rollback REMOTE_BACKUP --apply
+```text
+Use https://github.com/playeriv65/hpc-agent-kit to set up my Slurm HPC workflow.
+My cluster is [cluster name or SSH alias].
+Read AGENTS.md and skills/hpc-workflow/SKILL.md, then inspect my existing
+connection, jobs, resource permissions and storage. Adapt a private site profile,
+deploy the helpers and verify the workspace, automatic backups and recovery.
+Preserve my existing jobs and data. Ask me for missing access details or
+interactive authentication when needed.
 ```
 
-Once deployed, `SITE-gpu --request ID TYPE COUNT WALLTIME` requests/reuses an
-allocation. `SITE-gpu allocation ID` recovers its state. Use
-`SITE-gpu run --job JOB --request TASK --wait WINDOW -- COMMAND ...` for work.
-`SITE-agent-state doctor` checks the current writer and save freshness;
-`doctor --verify-backup` also verifies archive content. Doctor records an isolated
-health task; it does not alter experiments.
-Every check reports passed, failed, unknown or not_checked. With no compute route,
-doctor cannot establish storage/autosave health. Follow the skill's
-[recovery guide](skills/hpc-workflow/references/recovery.md) after failures.
+The agent probes the site, renders a deployment bundle and verifies the installed
+workflow. See the [skill](skills/hpc-workflow/SKILL.md) for the complete procedure.
+A separately installed skill needs the matching full repository checkout.
 
-Runtime requirements: Slurm on Linux with direct allocated-node SSH or the PSC terminal
-bridge. Local profile/deployment tooling uses uv and Python 3.12+ on Windows or
-Linux; remote helpers use Bash 4+, Python 3.6+, tmux, GNU tar, zstd, flock and GNU
-coreutils. Probe these on both login and compute nodes. Other schedulers and
-compute-access mechanisms require an adapter. CUDA/GCC belong to site/repository
-launchers. Installing only the skill requires obtaining its matching full checkout.
-
-## Validation and verified references
-
-Tests use synthetic data and stub schedulers with real tmux on Linux:
+After setup, commands have this form. `SITE`, GPU type, job ID and command are
+values from your installation and project:
 
 ```sh
-uv run python -m unittest discover -s common/tests -v
-uv run python common/check_repo.py
+SITE-gpu --request allocation-001 GPU_TYPE 1 01:00:00
+SITE-gpu allocation allocation-001
+SITE-gpu run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-agent-state doctor --verify-backup
 ```
 
-These tests do not consume GPUs. Real GPU acceptance is a separate opt-in procedure
-in the skill. The shared core was developed against MSI and PSC; source-site
-verification does not certify a newly generated installation. Abrupt node loss
-can recover only already committed backups. Keep checkpoints and results on
-persistent storage through explicit experiment options.
+## How it works
 
-Release v0.3.1 preserves the allocation's controlling terminal while logging,
-including through the PSC bridge, and isolates a PSC scratch root of `/local`
-inside a job-specific subdirectory. These corrections have Linux fixture
-coverage and passed a real PSC two-allocation V100 lifecycle on 2026-10-06:
-request replay, live backup health/integrity, automatic recovery on a different
-node, current-writer lease exclusion and pre-deadline backup. Tiny archives
-can trigger the configured incremental-size limit; successful full compaction
-is a valid deadline backup fallback. The source MSI two-allocation test used
-v0.3.0. Perform the skill's live acceptance before adopting a new site.
+```mermaid
+flowchart LR
+    A["Local coding agent"] --> L["Login tmux<br/>control + allocation"]
+    L --> C["Compute tmux<br/>setup + autosave + tasks"]
+    C --> W["Job-local workspace<br/>code + caches"]
+    W -->|"verified snapshots"| P["Persistent archive"]
+    P -->|"restore on next allocation"| W
+```
 
-Private profiles, authentication material, research data and deployment logs do
-not belong in a public checkout. The export manifest binds this release's files;
-it is an integrity inventory, not a cryptographic signature. Licensed under MIT.
+The login session holds the Slurm allocation; each job has its own compute tmux
+and named task windows. Bootstrap restores verified snapshots and starts
+periodic saves. Defaults are five-minute increments, six-hour full compaction
+and a save before the job deadline. Corrupt latest generations fall back to
+verified predecessors. Environments are recreated with `uv sync --locked`.
 
-Version 0.4.0 adds deployment journaling, automatic failure rollback and explicit
-rollback, check coverage reporting, expected-compaction classification, identical
-agent contracts and public generated-workspace regression tests. CI checks the
-public checkout on Linux and its inventory/contracts on Windows. Historical GPU
-acceptance above remains evidence for v0.3.1, not a new v0.4.0 GPU certification.
+For interactive authentication, an always-on jump host can retain a healthy SSH
+master across desktop shutdown. Read the
+[persistent SSH guide](docs/msi-persistent-ssh.md) for login ownership,
+connection reuse, channel saturation and recovery.
 
-## Contributing and privacy
+Sessions remain subject to Slurm walltime. Abrupt node loss can recover only
+committed backups. Put results and complete experiment checkpoints on persistent
+storage; restoring a workspace does not itself resume an experiment.
 
-When editing a development checkout, keep both README languages aligned,
-update both contract copies and refresh
-`export-manifest.json` hashes with `uv run python common/check_repo.py --refresh`
-for intentional source changes before validation. Add new maintained files to
-that inventory explicitly; the refresh command never sweeps private directories.
-Keep text files in LF format as specified by `.gitattributes`, so Git checkouts
-and release archives retain the same inventory hashes on Windows and Linux.
-Report problems with a redacted version/adapter/status/error record using the
-issue template. Do not post raw authentication material or full private task logs.
+## Compatibility
+
+The shared core targets Slurm on Linux. **MSI and PSC Bridges-2 are verified
+reference sites**, with version-specific evidence in the
+[verification record](docs/verification.md). Agents adapt other Slurm sites
+through private profiles and site acceptance.
+
+| Route | Support |
+| --- | --- |
+| Login-to-allocated-node SSH | `direct-ssh` adapter; verify site permission and compute access. |
+| PSC allocation-terminal/tmux bridge | `psc-bridge` adapter; another site's terminal behavior needs adaptation. |
+| Account, partitions, QoS, GPU GRES and storage paths | Configure from observed site facts; [MSI](examples/msi.example.json) and [PSC](examples/psc.example.json) are templates. |
+| Batch-only Slurm sites | Need an allocation backend; current backends use `salloc` + bootstrap `srun --pty`. |
+| Other schedulers | Need a scheduler adapter. |
+
+[`sbatch`](https://slurm.schedmd.com/sbatch.html),
+[`salloc`](https://slurm.schedmd.com/salloc.html) and
+[`srun`](https://slurm.schedmd.com/srun.html) are Slurm commands; their availability
+and permitted use depend on the site. Local tooling uses uv and Python 3.12+ on
+Windows or Linux. Remote helpers require Bash 4+, Python 3.6+, tmux, GNU tar,
+zstd, flock and GNU tools on login and compute nodes. See
+[runtime and operations](docs/usage.md) for details.
+
+## Guides
+
+- [Agent skill](skills/hpc-workflow/SKILL.md): establish, operate and recover a site.
+- [Site probing](skills/hpc-workflow/references/site-probing.md): connection, resources, storage and toolchain evidence.
+- [Persistent SSH](docs/msi-persistent-ssh.md): MSI and adaptable jump-host routes.
+- [Operations](docs/usage.md): components, deployment, commands, health and rollback.
+- [Acceptance](skills/hpc-workflow/references/acceptance.md) and [verification record](docs/verification.md): what has been checked and how to verify a new site.
+- [Recovery](skills/hpc-workflow/references/recovery.md): failure-specific actions.
+- [Related tools](docs/related-tools.md): other HPC clients, interfaces and skill collections.
+
+## Try it on your cluster
+
+Adapting another Slurm site? [Open an issue](https://github.com/playeriv65/hpc-agent-kit/issues/new/choose)
+with the connection method, allocation policy and storage layout. Site reports,
+adapter fixes and clearer operating notes are useful contributions. Keep private
+profiles, credentials, research data and raw logs out of public reports.
+
+Maintain both README languages and identical agent contracts. See the
+[maintenance notes](docs/usage.md#maintaining-the-repository) for inventory checks
+and the existing offline test suite. Code and release assets are available in
+[this repository](https://github.com/playeriv65/hpc-agent-kit) and
+[releases](https://github.com/playeriv65/hpc-agent-kit/releases).
+Licensed under [MIT](LICENSE).
