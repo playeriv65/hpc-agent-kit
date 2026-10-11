@@ -1,0 +1,19 @@
+name: Validate public kit
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y tmux zstd
+      - run: uv sync --locked
+      - run: uv run python common/check_repo.py
+      - run: uv run python -m unittest discover -s common/tests -v
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run python common/check_repo.py

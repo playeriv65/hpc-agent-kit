@@ -1,0 +1,9 @@
+private/
+outputs/
+.venv/
+__pycache__/
+*.pyc
+*.key
+*.pem
+*.tar.zst
+*.tar.gz
