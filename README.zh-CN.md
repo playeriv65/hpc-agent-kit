@@ -48,7 +48,9 @@ Agent 负责探测站点、生成部署包并验证安装后的工作流程。�
 npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
 ```
 
-安装后的 skill 会指引 Agent 获取匹配的脚本仓库。市场发布与授权方式见
+安装后的 skill 会指引 Agent 获取匹配的脚本仓库。已上线
+[skills.sh](https://skills.sh/playeriv65/hpc-agent-kit/hpc-workflow) 和
+[ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow)。市场发布与授权方式见
 [分发说明](docs/distribution.md)。
 
 建立环境后，命令采用下面的形式。`SITE`、GPU 类型、作业 ID 和命令根据实际安装

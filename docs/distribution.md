@@ -4,6 +4,9 @@ The canonical source is [playeriv65/hpc-agent-kit](https://github.com/playeriv65
 The installable agent instructions are in `skills/hpc-workflow/`. Runtime helpers,
 site examples and the operating contract live in the full repository.
 
+Public listings: [skills.sh](https://skills.sh/playeriv65/hpc-agent-kit/hpc-workflow)
+and [ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow).
+
 ## Install from GitHub
 
 ```sh
@@ -53,8 +56,8 @@ alternative is:
 ```sh
 clawhub skill publish skills/hpc-workflow \
   --slug hpc-workflow --name "HPC Agent Kit" --version VERSION \
-  --categories operations,development,automation \
-  --topics slurm,hpc,gpu,tmux,backup \
+  --categories 'operations,development,automation' \
+  --topics 'slurm,hpc,gpu,tmux,backup' \
   --source-repo playeriv65/hpc-agent-kit --source-commit COMMIT \
   --source-path skills/hpc-workflow --dry-run
 ```

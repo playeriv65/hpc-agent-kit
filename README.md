@@ -53,6 +53,8 @@ npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
 ```
 
 The installed skill tells the agent where to obtain the matching helper checkout.
+Find it on [skills.sh](https://skills.sh/playeriv65/hpc-agent-kit/hpc-workflow)
+and [ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow).
 See [distribution](docs/distribution.md) for registry publishing and licensing.
 
 After setup, commands have this form. `SITE`, GPU type, job ID and command are
