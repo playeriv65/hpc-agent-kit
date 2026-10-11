@@ -48,6 +48,12 @@ installation; it does not authorize publication or unrelated cleanup.
 
 ## Maintaining this repository
 
+Keep `README.md` and `README.zh-CN.md` aligned when changing user-facing behavior
+or supported scope. Describe MSI and PSC as verified reference sites; adapt
+other Slurm sites through observed profiles and tested adapters. The current
+allocation backends use `salloc` plus bootstrap `srun`; do not imply that a
+batch-only `sbatch` route is already implemented or that every site is verified.
+
 Use uv and Python 3.12+ locally; installed Linux helpers support Python 3.6+.
 Keep remote code compatible with that runtime. Shared templates under `common/`
 are authoritative; site adapters describe actual differences. Do not patch an
