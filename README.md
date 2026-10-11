@@ -46,6 +46,15 @@ The agent probes the site, renders a deployment bundle and verifies the installe
 workflow. See the [skill](skills/hpc-workflow/SKILL.md) for the complete procedure.
 A separately installed skill needs the matching full repository checkout.
 
+You can also install the agent instructions with the Skills CLI:
+
+```sh
+npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
+```
+
+The installed skill tells the agent where to obtain the matching helper checkout.
+See [distribution](docs/distribution.md) for registry publishing and licensing.
+
 After setup, commands have this form. `SITE`, GPU type, job ID and command are
 values from your installation and project:
 
@@ -128,4 +137,5 @@ Maintain both README languages and identical agent contracts. See the
 and the existing offline test suite. Code and release assets are available in
 [this repository](https://github.com/playeriv65/hpc-agent-kit) and
 [releases](https://github.com/playeriv65/hpc-agent-kit/releases).
-Licensed under [MIT](LICENSE).
+Repository code is [MIT](LICENSE); the [skill instructions](skills/hpc-workflow/LICENSE)
+also offer MIT-0 for registries that require it.

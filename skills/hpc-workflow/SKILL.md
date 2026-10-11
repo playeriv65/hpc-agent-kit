@@ -1,15 +1,28 @@
 ---
 name: hpc-workflow
 description: Set up, adapt, or recover an agent-operated Slurm GPU workspace with nested tmux, durable allocation requests, job-local storage and verified automatic backups. Use when asked to establish an HPC workflow from this repository or operate an existing installation.
+license: MIT OR MIT-0
+metadata:
+  author: playeriv65
+  repository: https://github.com/playeriv65/hpc-agent-kit
 ---
 
 # Agent-operated HPC workflow
 
+Use a local coding agent with shell access, Git, uv and a supported authenticated
+HPC connection. Remote helpers require Slurm, Bash, Python, tmux, tar and zstd;
+the full runtime requirements are in the resolved checkout's `docs/usage.md`.
+
 The deliverable is a working connection and operating contract for the user's
 actual cluster. Resolve the repository checkout containing `common/profile.py`;
 paths below are relative to that checkout. This skill ships in that repository.
-If using an independently installed copy, locate the matching repository first;
-if absent, obtain the user's referenced repository/release in a local workspace.
+The canonical source is https://github.com/playeriv65/hpc-agent-kit. Market
+installers copy this skill directory, not the remote helpers. If using an
+independently installed copy, locate the matching repository first; if absent,
+clone the canonical source into a new local workspace. Compare this installed
+`SKILL.md` with `skills/hpc-workflow/SKILL.md` in the checkout. If they differ,
+locate the matching source revision or update both from one reviewed revision;
+do not mix instructions from one version with helpers from another.
 Use the same version for instructions and scripts; record the resolved path and
 version in private site notes. Do not assume the skill directory contains helpers
 or invent a download URL. Read the checkout's `AGENTS.md` or identical `CLAUDE.md`.
@@ -19,7 +32,7 @@ Run `uv run python common/check_repo.py` to verify its inventory and contracts.
 
 Inspect the existing connection, jobs, tmux hierarchy and operator instructions
 first. Reuse a supported installation where possible. Read
-the [MSI persistent SSH guide](../../docs/msi-persistent-ssh.md) when adapting
+`docs/msi-persistent-ssh.md` in the resolved checkout when adapting
 an MSI/Duo route or an always-on authenticated holder, then read
 [site probing](references/site-probing.md) to establish the transport, Slurm/QoS
 permissions, disk-backed local paths and persistent archive location. Unknown

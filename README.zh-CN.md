@@ -42,6 +42,15 @@ git clone https://github.com/playeriv65/hpc-agent-kit.git
 Agent 负责探测站点、生成部署包并验证安装后的工作流程。完整步骤见
 [skill](skills/hpc-workflow/SKILL.md)。单独安装 skill 时，需要取得与之匹配的完整仓库。
 
+也可以通过 Skills CLI 安装 Agent 使用说明：
+
+```sh
+npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
+```
+
+安装后的 skill 会指引 Agent 获取匹配的脚本仓库。市场发布与授权方式见
+[分发说明](docs/distribution.md)。
+
 建立环境后，命令采用下面的形式。`SITE`、GPU 类型、作业 ID 和命令根据实际安装
 与项目填写：
 
@@ -117,4 +126,5 @@ GNU 工具。详见[运行条件与操作说明](docs/usage.md)。
 见[维护说明](docs/usage.md#maintaining-the-repository)。代码和发布包分别位于
 [本仓库](https://github.com/playeriv65/hpc-agent-kit)和
 [Releases](https://github.com/playeriv65/hpc-agent-kit/releases)。
-采用 [MIT](LICENSE) 许可证。
+仓库代码采用 [MIT](LICENSE)；[skill 指令文档](skills/hpc-workflow/LICENSE)
+另提供 MIT-0 授权，以兼容有此要求的市场。
