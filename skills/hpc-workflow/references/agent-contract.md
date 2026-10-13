@@ -44,4 +44,3 @@ Preserve research jobs, uncertain records, archives and failure evidence. Do not
 cancel unrelated work, overwrite checkpoints, retry MFA automatically or replace
 a healthy transport. A user's setup/repair request authorizes ordinary scoped
 installation; it does not authorize publication or unrelated cleanup.
-

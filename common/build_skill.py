@@ -37,7 +37,7 @@ def generated():
     contract = contract[contract.index('## Deliver the user'):contract.index('## Maintaining this repository')]
     contract = contract.replace('skills/hpc-workflow/references/', '').replace('skills/hpc-workflow/SKILL.md', '../SKILL.md')
     contract = contract.replace('outside the checkout', 'outside the installed skill directory')
-    files['references/agent-contract.md'] = '# Packaged operating contract\n\n' + contract
+    files['references/agent-contract.md'] = '# Packaged operating contract\n\n' + contract.rstrip() + '\n'
     return {name: text.encode('utf-8') for name, text in files.items()}
 
 
