@@ -18,14 +18,15 @@ logs and private profiles. Do not infer job completion from a disconnect.
 
 Upgrade with a new immutable staging directory. Verify the profile and hashes;
 do not change account, archive, namespace or transport as an incidental upgrade.
-`uv run python common/deploy_bundle.py BUNDLE` validates locally. `--apply`
+`uv run --no-project --python 3.12 python scripts/common/deploy_bundle.py BUNDLE`
+validates locally. `--apply`
 installs after scheduler/request/lease checks. The result includes an exact backup.
 
 To restore a completed upgrade's prior installation:
 
 ```sh
-uv run python common/deploy_bundle.py BUNDLE --rollback REMOTE_BACKUP
-uv run python common/deploy_bundle.py BUNDLE --rollback REMOTE_BACKUP --apply
+uv run --no-project --python 3.12 python scripts/common/deploy_bundle.py BUNDLE --rollback REMOTE_BACKUP
+uv run --no-project --python 3.12 python scripts/common/deploy_bundle.py BUNDLE --rollback REMOTE_BACKUP --apply
 ```
 
 Backups are accepted only below the remote user's `~/.local/state/hpc-core-backups`.
@@ -43,7 +44,7 @@ The private profile can set `snapshot.interval`, `compact_seconds`, `end_margin`
 `generations_keep`, `full_families_keep`, `max_incremental_ratio` and
 `home_budget_gb` as integer policy values. Retention requires at least two
 generations and two independent full families. Measure disposable data on a
-permitted worker with `uv run python common/tests/benchmark_snapshot.py
+permitted worker with `uv run --no-project --python 3.12 python scripts/common/tests/benchmark_snapshot.py
 --size-mib 1024 --files 10000`; it does not establish another filesystem's speed.
 Do not advertise the five-minute autosave cadence as a guaranteed loss bound;
 recovery is limited to successfully committed generations.

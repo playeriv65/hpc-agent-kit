@@ -1,53 +1,50 @@
 ---
 name: hpc-workflow
-description: Set up, adapt, or recover an agent-operated Slurm GPU workspace with nested tmux, durable allocation requests, job-local storage and verified automatic backups. Use when asked to establish an HPC workflow from this repository or operate an existing installation.
+description: Set up, adapt, operate or recover an agent-operated Slurm GPU workspace using bundled scripts, nested tmux, durable allocation requests, job-local storage and verified automatic backups. Use when asked to establish an HPC workflow or operate an existing installation.
 license: MIT OR MIT-0
 metadata:
   author: playeriv65
+  version: "0.4.1"
   repository: https://github.com/playeriv65/hpc-agent-kit
 ---
 
 # Agent-operated HPC workflow
 
-Use a local coding agent with shell access, Git, uv and a supported authenticated
-HPC connection. Remote helpers require Slurm, Bash, Python, tmux, tar and zstd;
-the full runtime requirements are in the resolved checkout's `docs/usage.md`.
+Use a local coding agent with shell access, uv and a supported authenticated HPC
+connection. This skill includes its runtime under `scripts/`, site templates
+under `assets/` and operating notes under `references/`. Resolve this installed
+skill directory; paths below are relative to it. No separate Git checkout is
+required. Read [the operating contract](references/agent-contract.md) and
+[runtime requirements](references/runtime.md). Verify packaged files with
+`uv run --no-project --python 3.12 python scripts/verify_bundle.py`.
 
 The deliverable is a working connection and operating contract for the user's
-actual cluster. Resolve the repository checkout containing `common/profile.py`;
-paths below are relative to that checkout. This skill ships in that repository.
-The canonical source is https://github.com/playeriv65/hpc-agent-kit. Market
-installers copy this skill directory, not the remote helpers. If using an
-independently installed copy, locate the matching repository first; if absent,
-clone the canonical source into a new local workspace. Compare this installed
-`SKILL.md` with `skills/hpc-workflow/SKILL.md` in the checkout. If they differ,
-locate the matching source revision or update both from one reviewed revision;
-do not mix instructions from one version with helpers from another.
-Use the same version for instructions and scripts; record the resolved path and
-version in private site notes. Do not assume the skill directory contains helpers
-or invent a download URL. Read the checkout's `AGENTS.md` or identical `CLAUDE.md`.
-Run `uv run python common/check_repo.py` to verify its inventory and contracts.
+actual cluster. Keep private profiles, generated bundles and logs outside this
+installed directory. Record the package/core versions and installed hashes in
+the site's private notes. Reuse healthy existing installations for ordinary
+operation; installing this skill does not authenticate to an HPC or request GPUs.
 
 ## Establish or adapt a site
 
 Inspect the existing connection, jobs, tmux hierarchy and operator instructions
 first. Reuse a supported installation where possible. Read
-`docs/msi-persistent-ssh.md` in the resolved checkout when adapting
+[persistent SSH](references/msi-persistent-ssh.md) when adapting
 an MSI/Duo route or an always-on authenticated holder, then read
 [site probing](references/site-probing.md) to establish the transport, Slurm/QoS
 permissions, disk-backed local paths and persistent archive location. Unknown
 facts stay unknown; idle hardware does not establish project access.
 
 Create a private profile using the observed facts and the examples under
-`examples/`. Select `direct-ssh` when login-to-compute SSH is proven, or
+`assets/`. Select `direct-ssh` when login-to-compute SSH is proven, or
 `psc-bridge` for PSC's allocation-terminal bridge. The profile renderer rejects
 unfilled values, unverified local/persistent storage, non-isolated local paths
 and QoS outside the project/partition intersection. These checks validate the
 provided facts; they do not discover or independently prove those facts.
 
-Run `uv run --no-project --python 3.12 python common/profile.py PROFILE.json
+Run `uv run --no-project --python 3.12 python scripts/common/profile.py PROFILE.json
 --output NEW_STAGING_DIRECTORY`. Inspect the generated profile and manifest.
-`common/deploy_bundle.py BUNDLE` checks frozen bytes and shows its targets;
+`uv run --no-project --python 3.12 python scripts/common/deploy_bundle.py BUNDLE`
+checks frozen bytes and shows its targets;
 `--apply` installs through the profile's already-authenticated exec route after
 quiescent-state checks, preserving old helpers and configuration. Use deployment
 within the user's authorized setup scope. Do not publish private profiles.

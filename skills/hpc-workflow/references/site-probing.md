@@ -43,12 +43,12 @@ first. Retire only owned probe allocations covered by the validation scope.
 
 `transport.exec_argv` must accept a shell script on stdin. An authenticated SSH
 route can use `ssh LOGIN bash -s`. If the user's supported CLI instead exposes
-literal `exec` and binary `push`, use the checkout's `common/shim_exec.py` bridge:
-`uv run python /CHECKOUT/common/shim_exec.py -- SHIM_PROGRAM SHIM_ARGUMENTS`.
+literal `exec` and binary `push`, use the packaged `scripts/common/shim_exec.py` bridge:
+`uv run --no-project --python 3.12 python /SKILL/scripts/common/shim_exec.py -- SHIM_PROGRAM SHIM_ARGUMENTS`.
 For a Windows `.ps1` shim, its argv starts with `pwsh -NoProfile -File /PATH/SHIM.ps1`.
 The bridge stages verified bytes using that same CLI; it never initiates login,
 uses SCP or places a large payload in Windows process arguments. Store absolute
-checkout/shim paths in the private profile and test the stdin route with a small
+skill/shim paths in the private profile and test the stdin route with a small
 identity script before deployment.
 
 MSI reference: a holder on a separate always-on host can retain authenticated

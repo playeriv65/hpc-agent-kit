@@ -3,8 +3,11 @@
 Start with the repository's [README](../README.md) and
 [hpc-workflow skill](../skills/hpc-workflow/SKILL.md). The agent stays on the
 user's machine, establishes site facts and installs remote helpers through the
-existing authenticated route. An independently installed skill needs a matching
-full checkout. Keep private profiles and installed-site notes outside public files.
+existing authenticated route. An independently installed skill carries its own
+scripts, templates and references, and needs no separate checkout. Use its
+`scripts/common/` paths and `scripts/verify_bundle.py` integrity check. The commands
+below use the full repository layout. Keep private profiles and installed-site
+notes outside public files.
 
 ## Components
 
@@ -112,6 +115,8 @@ byte-identical. Shared templates under `common/` are authoritative. For
 intentional edits, refresh existing allowlisted hashes before validation:
 
 ```sh
+uv run python common/build_skill.py
+uv run python common/build_skill.py --check
 uv run python common/check_repo.py --refresh
 uv run python common/check_repo.py
 uv run python -m unittest discover -s common/tests -v

@@ -1,8 +1,10 @@
 # Skill distribution
 
 The canonical source is [playeriv65/hpc-agent-kit](https://github.com/playeriv65/hpc-agent-kit).
-The installable agent instructions are in `skills/hpc-workflow/`. Runtime helpers,
-site examples and the operating contract live in the full repository.
+The complete installable skill is in `skills/hpc-workflow/`. It includes runtime
+helpers under `scripts/`, site examples under `assets/`, the operating contract,
+reference documents and a hash manifest. No separate repository checkout is
+needed after skill installation.
 
 Public listings: [skills.sh](https://skills.sh/playeriv65/hpc-agent-kit/hpc-workflow)
 and [ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow).
@@ -14,10 +16,10 @@ npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
 ```
 
 Select the agent and installation scope using the CLI prompts. The installed
-skill tells the agent to find or obtain the matching helper checkout, compare
-the instructions and run `common/check_repo.py` before setting up a site. An
-installation of the instructions alone does not install remote HPC helpers,
-authenticate to a cluster or request GPUs.
+skill uses its bundled helpers and runs
+`uv run --no-project --python 3.12 python scripts/verify_bundle.py` from its own
+directory. Installing the package does not authenticate to a cluster, deploy
+remote helpers or request GPUs; the agent performs setup within the user's scope.
 
 To inspect available skills without installing them:
 
@@ -34,9 +36,9 @@ locations are managed by their installer.
 | Service | Distribution mechanism |
 | --- | --- |
 | [skills.sh](https://skills.sh/docs/faq) | Discoverable through the Skills CLI. Its leaderboard is populated from real installations with anonymous telemetry enabled; there is no separate upload form. |
-| [ClawHub](https://github.com/openclaw/clawhub/blob/main/docs/publishing.md) | Import the public GitHub skill directory or publish that directory with the official CLI. A new release may wait for automated review before installation becomes available. |
+| [ClawHub](https://github.com/openclaw/clawhub/blob/main/docs/cli.md) | Publish the skill directory with the official `clawhub skill publish` CLI. A new release may wait for automated review before installation becomes available. |
 | [SkillsMP](https://skillsmp.com/docs/faq) | Indexes public GitHub skills. A public, compatible skill is eligible for discovery; this does not guarantee a listing or a crawl date. |
-| [SkillHub](https://www.skillhub.club) | Offers a signed-in publishing interface and GitHub discovery. Verify the resulting listing rather than treating a public repository as proof of inclusion. |
+| [SkillHub](https://github.com/skillhub-club/cli) | The official `@skill-hub/cli` provides `skillhub push`, `skillhub publish` and `skillhub status`. Verify the resulting listing rather than treating upload success as public visibility. |
 
 Catalog inclusion and an automated scan are not independent validation of an
 HPC installation. MSI and PSC are the verified reference sites; other Slurm
@@ -45,13 +47,27 @@ uses `salloc` and a bootstrap `srun`; an `sbatch`-only adapter is not implemente
 
 ## Publish a matching revision
 
-Maintain one source folder for all catalogs. Check the skill's local references,
-run `uv run python common/check_repo.py` in the full checkout, and perform a
+Maintain one source folder for all catalogs. Run `uv run python common/build_skill.py`
+after changing maintained helpers, templates or contracts, then run it with
+`--check`. Check the skill's local references, run
+`uv run python common/check_repo.py` in the full checkout, and perform a
 fresh installation into an isolated directory before publishing. Keep private
 profiles, credentials, probes and research data out of all upload packages.
 
-For ClawHub, import `skills/hpc-workflow` from a reviewed public commit. The CLI
-alternative is:
+Use the official CLIs for routine releases. Install them with npm in a maintained
+Node.js environment, then verify their versions and authentication:
+
+```sh
+npm install -g clawhub @skill-hub/cli skills
+clawhub whoami
+skillhub whoami
+skills --version
+```
+
+Initial authorization may require a browser. Reuse saved credentials for subsequent
+uploads; report authentication errors instead of silently switching to web uploads.
+
+For ClawHub, publish `skills/hpc-workflow` from a reviewed public commit:
 
 ```sh
 clawhub skill publish skills/hpc-workflow \
@@ -68,9 +84,22 @@ never commit a registry token or place one in the skill. Record the published
 version, source commit, URL and review status in release notes. Upload success,
 public visibility and successful installation are separate checks.
 
+For SkillHub, prepare a separate copy of the skill directory and link an existing
+listing with `skillhub init --link SKILL_ID`. Keep its local `.skillhub.json` and
+authentication data out of the canonical skill and other registry packages. Use
+`skillhub status`, then `skillhub push --message "Describe the changes"` and
+`skillhub publish --yes` for an authorized release.
+
+The verified SkillHub CLI `0.1.9` requires browser OAuth for its first login. Its
+file scanner excludes extensionless files, so the complete package uses
+`LICENSE.txt` and names its PSC shell template `psc-gpu.sh`. Check
+the full scanned inventory before uploading. Linking, staging and local validation
+do not establish authentication, a successful upload or public availability.
+
 ## Licensing
 
-Repository runtime code remains [MIT](../LICENSE). The instructions and reference
-documents inside `skills/hpc-workflow/` are also offered under MIT-0, as stated
-in [the skill license](../skills/hpc-workflow/LICENSE), for ClawHub distribution.
+Repository runtime source code remains [MIT](../LICENSE). All content inside the
+packaged `skills/hpc-workflow/` directory, including scripts and templates, is
+also offered under MIT-0, as stated in
+[the skill license](../skills/hpc-workflow/LICENSE.txt), for ClawHub distribution.
 This additional grant does not change the license of files outside that folder.

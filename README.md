@@ -44,15 +44,16 @@ interactive authentication when needed.
 
 The agent probes the site, renders a deployment bundle and verifies the installed
 workflow. See the [skill](skills/hpc-workflow/SKILL.md) for the complete procedure.
-A separately installed skill needs the matching full repository checkout.
+A separately installed skill includes the runtime scripts, site templates and
+operating contract; it works without a separate repository checkout.
 
-You can also install the agent instructions with the Skills CLI:
+You can also install the complete skill with the Skills CLI:
 
 ```sh
 npx skills add playeriv65/hpc-agent-kit --skill hpc-workflow
 ```
 
-The installed skill tells the agent where to obtain the matching helper checkout.
+The agent uses the bundled helpers directly and verifies their package manifest.
 Find it on [skills.sh](https://skills.sh/playeriv65/hpc-agent-kit/hpc-workflow)
 and [ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow).
 See [distribution](docs/distribution.md) for registry publishing and licensing.
@@ -139,5 +140,6 @@ Maintain both README languages and identical agent contracts. See the
 and the existing offline test suite. Code and release assets are available in
 [this repository](https://github.com/playeriv65/hpc-agent-kit) and
 [releases](https://github.com/playeriv65/hpc-agent-kit/releases).
-Repository code is [MIT](LICENSE); the [skill instructions](skills/hpc-workflow/LICENSE)
-also offer MIT-0 for registries that require it.
+Repository source code is [MIT](LICENSE); the complete
+[skill package](skills/hpc-workflow/LICENSE.txt), including its bundled scripts
+and templates, also offers MIT-0 for registries that require it.

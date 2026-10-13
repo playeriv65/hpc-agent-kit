@@ -65,6 +65,11 @@ are authoritative; site adapters describe actual differences. Do not patch an
 installed or generated helper without fixing its maintained source.
 
 Run `common/check_repo.py` and the Linux suite under `common/tests` before shipping.
+The installable skill includes generated helpers and site templates. After
+changing maintained sources, run `common/build_skill.py` and then
+`common/build_skill.py --check`; do not hand-edit packaged script copies.
+Standalone skill operation needs no external checkout. Keep its private outputs
+outside the installed directory and use its packaged integrity verifier.
 The suite renders actual helpers and uses real tmux, synthetic storage and stub
 schedulers; it consumes no GPUs. Follow the skill's acceptance procedure for
 authorized live checks. Report fixture tests, actual installation checks and real

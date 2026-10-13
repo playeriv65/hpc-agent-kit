@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import tomllib
+import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +28,7 @@ def check(root=ROOT, refresh=False):
     skill = root / 'skills/hpc-workflow/SKILL.md'
     for reference in ('site-probing.md', 'acceptance.md', 'recovery.md'):
         if not (skill.parent / 'references' / reference).is_file(): raise ValueError('Missing skill reference')
+    subprocess.run([sys.executable, str(root / 'common/build_skill.py'), '--check'], check=True, capture_output=True)
     if refresh:
         manifest['core_version'] = metadata['project']['version']
         manifest['files'] = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in manifest['files']}
