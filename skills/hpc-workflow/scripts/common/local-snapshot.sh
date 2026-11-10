@@ -243,9 +243,15 @@ verify_pack() {
 
 snapshot_budget() {
     local source="$1" destination="$2"
-    if [[ '@SITE@' == msi && "$destination" == "$HOME/"* ]]; then
+    # Compare physical paths: a home path that symlinks to project storage
+    # does not count against the home quota.
+    local real_destination real_home
+    real_destination="$(readlink -m -- "$destination")"
+    real_home="$(readlink -m -- "$HOME")"
+    if [[ '@SITE@' == msi && "$real_destination" == "$real_home/"* ]]; then
         local usage
-        usage="$(userquota -c -U G | awk -F, -v user="$USER" '$1==user {print $2}')"
+        # userquota lives in /usr/local/bin, which compute-node tmux PATHs omit.
+        usage="$(PATH="$PATH:/usr/local/bin" userquota -c -U G | awk -F, -v user="$USER" '$1==user {print $2}')"
         [[ "$usage" =~ ^[0-9]+([.][0-9]+)?$ ]] || die 'home quota unknown; refusing snapshot publication'
         python3 - "$usage" "$(stat -c %s "$source")" "${@PREFIX@_LOCAL_SNAPSHOT_HOME_BUDGET_GB:-100}" <<'PY'
 import sys

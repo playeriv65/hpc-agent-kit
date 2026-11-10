@@ -18,7 +18,7 @@
     "scripts/common/deploy_bundle.py": "58d19d35b2851e468d345cf2b136ab04eb43e3e20e30ec5825fc1e21e53021b7",
     "scripts/common/health.py": "bc5a140ae8644bdf826913b21c60a5e549d1e21336f8148730dabfa3ed35bc74",
     "scripts/common/install-release.py": "331784946b528ab43f157b164ded636f644c6d55392b0f86989be464d0e1afa0",
-    "scripts/common/local-snapshot.sh": "16656b2c2cb459bc4e3c9ba242bf1ddd01a8f77ead501d449601ab8ced679594",
+    "scripts/common/local-snapshot.sh": "9541e4edd46d21fe75d516bbf87ce4a38529be0b377124427ea2493555e42b09",
     "scripts/common/profile.py": "dca902cdf3178f6da4eca2a90d125fe9bc722133ffedd946e4594d07ea92152b",
     "scripts/common/shim_exec.py": "3fa0ccbefc1176bfa2de1b5da3522976a51fe8d5562e96936f511227a7cf2d41",
     "scripts/common/sites/psc-boot.sh": "e6c6138c8c7e442abb5dc5f66793c3ab15673c29c85fdf28756edb6d0545ec56",
