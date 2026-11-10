@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-config_file="${PSC_GPU_CONFIG:-$HOME/.config/psc-gpu/gpu.env}"
+config_file="${PSC_ALLOCATE_CONFIG:-$HOME/.config/psc-allocate/allocate.env}"
 if [[ -r "$config_file" ]]; then set -a; source "$config_file"; set +a; fi
 
-outer_socket="${PSC_GPU_OUTER_SOCKET:-}"
-outer_target="${PSC_GPU_OUTER_TARGET:-}"
-outer_pane_pid="${PSC_GPU_OUTER_PANE_PID:-}"
+outer_socket="${PSC_ALLOCATE_OUTER_SOCKET:-}"
+outer_target="${PSC_ALLOCATE_OUTER_TARGET:-}"
+outer_pane_pid="${PSC_ALLOCATE_OUTER_PANE_PID:-}"
 unset TMOUT
-unset PSC_GPU_OUTER_SOCKET PSC_GPU_OUTER_TARGET PSC_GPU_OUTER_PANE_PID
+unset PSC_ALLOCATE_OUTER_SOCKET PSC_ALLOCATE_OUTER_TARGET PSC_ALLOCATE_OUTER_PANE_PID
 unset TMUX TMUX_PANE
 export TERM=xterm-256color
 
-: "${SLURM_JOB_ID:?psc-gpu-boot must run inside a Slurm allocation}"
+: "${SLURM_JOB_ID:?psc-allocate-boot must run inside a Slurm allocation}"
 # Some PSC GPU nodes expose /local itself as the allocation's scratch root.
 # Keep the workspace below that root so restore never operates on /local.
 if [[ ( "${LOCAL:-}" == /local || -z "${LOCAL:-}" ) &&
@@ -25,9 +25,9 @@ if [[ -f "$HOME/.psc-local-env.sh" ]]; then
     source "$HOME/.psc-local-env.sh"
 fi
 
-toolchain_config="${PSC_GPU_TOOLCHAIN_CONFIG:-$HOME/.config/psc-gpu/toolchain.env}"
+toolchain_config="${PSC_TOOLCHAIN_CONFIG:-$HOME/.config/psc-allocate/toolchain.env}"
 if [[ "${PSC_TOOLCHAIN_DISABLED:-0}" == 1 ]]; then
-    echo 'psc-gpu-boot: site-wide toolchain setup disabled; use repository launchers'
+    echo 'psc-allocate-boot: site-wide toolchain setup disabled; use repository launchers'
 elif [[ -r "$toolchain_config" ]]; then
     set -a
     # shellcheck disable=SC1090
@@ -43,46 +43,52 @@ elif [[ -r "$toolchain_config" ]]; then
         done
     fi
     type module >/dev/null 2>&1 || {
-        printf 'psc-gpu-boot: PSC module command is unavailable\n' >&2
+        printf 'psc-allocate-boot: PSC module command is unavailable\n' >&2
         exit 2
     }
     module load "$GCC_MODULE"
-    export CC CXX CUDA_HOME
-    export PSC_GPU_TOOLCHAIN_READY=1
-    export PATH="$CUDA_HOME/bin:$PATH"
-    export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export CC CXX
+    if [[ "${HPC_ALLOCATION_KIND:-}" == gpu ]]; then
+        export CUDA_HOME
+        export PATH="$CUDA_HOME/bin:$PATH"
+        export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    else
+        # CPU allocations get the host compiler only; no CUDA toolkit is published.
+        unset CUDA_HOME
+    fi
+    export PSC_TOOLCHAIN_READY=1
 else
-    printf 'psc-gpu-boot: missing toolchain config: %s\n' "$toolchain_config" >&2
+    printf 'psc-allocate-boot: missing toolchain config: %s\n' "$toolchain_config" >&2
     exit 2
 fi
 
-: "${SLURM_JOB_ID:?psc-gpu-boot must run inside a Slurm allocation}"
+: "${SLURM_JOB_ID:?psc-allocate-boot must run inside a Slurm allocation}"
 
 job_id="$SLURM_JOB_ID"
 host_name="$(hostname -s)"
-socket="gpu-${job_id}"
+socket="alloc-${job_id}"
 session=zovllm
 inner_tmux=(/usr/bin/tmux -L "$socket" -f "$HOME/.tmux.inner.conf")
-state_dir="${PSC_GPU_STATE_DIR:-$HOME/.local/state/psc-gpu}"
+state_dir="${PSC_ALLOCATE_STATE_DIR:-$HOME/.local/state/psc-allocate}"
 route_dir="$state_dir/routes"
 route_file="$route_dir/$job_id.route"
 core_bin="${HPC_CORE_BIN:-$HOME/.local/bin}"
 snapshot="$core_bin/psc-local-snapshot"
 if [[ -n "${HPC_ALLOCATION_REQUEST_ID:-}" ]]; then
-    PSC_GPU_STATE_DIR="$state_dir" "$core_bin/psc-allocation" bind "$HPC_ALLOCATION_REQUEST_ID" --job "$job_id"
+    PSC_ALLOCATE_STATE_DIR="$state_dir" "$core_bin/psc-allocation" bind "$HPC_ALLOCATION_REQUEST_ID" --job "$job_id"
 fi
 @BOOT_GUARD@
-restore_status="${TMPDIR:-/tmp}/psc-gpu-restore-${job_id}.status"
+restore_status="${TMPDIR:-/tmp}/psc-allocate-restore-${job_id}.status"
 restore_stamp="$(date +%Y%m%d-%H%M%S)"
 restore_log="$HOME/logs/psc/local-restore_job-${job_id}_${restore_stamp}.log"
-doctor_status="${TMPDIR:-/tmp}/psc-gpu-doctor-${job_id}.status"
+doctor_status="${TMPDIR:-/tmp}/psc-allocate-doctor-${job_id}.status"
 doctor_log="$HOME/logs/psc/terminal-doctor_job-${job_id}_${restore_stamp}.log"
 
 mkdir -p "$HOME/logs/psc"
 rm -f "$restore_status"
 "${inner_tmux[@]}" new-session -d -s zovllm -n zovllm-setup \
     /bin/bash --noprofile --norc
-for key in HPC_CORE_BIN PSC_LOCAL_SNAPSHOT_ARCHIVE PSC_LOCAL_SNAPSHOT_READY_SECONDS PSC_GPU_AUTOSAVE_INTERVAL; do
+for key in HPC_ALLOCATION_KIND HPC_CORE_BIN PSC_LOCAL_SNAPSHOT_ARCHIVE PSC_LOCAL_SNAPSHOT_READY_SECONDS PSC_ALLOCATE_AUTOSAVE_INTERVAL; do
     [[ -z "${!key:-}" ]] || "${inner_tmux[@]}" set-environment -g "$key" "${!key}"
 done
 end_time="$(scontrol show job "$job_id" -o | sed -n 's/.* EndTime=\([^ ]*\).*/\1/p')"
@@ -101,18 +107,18 @@ for ((attempt = 0; attempt < 360; attempt++)); do
 done
 
 if [[ ! -s "$restore_status" ]]; then
-    echo "psc-gpu-boot: snapshot restore timed out; see $restore_log" >&2
+    echo "psc-allocate-boot: snapshot restore timed out; see $restore_log" >&2
     exit 1
 fi
 
 if [[ "$(<"$restore_status")" != success ]]; then
-    echo "psc-gpu-boot: snapshot restore failed; see $restore_log" >&2
+    echo "psc-allocate-boot: snapshot restore failed; see $restore_log" >&2
     exit 1
 fi
 
 if [[ "${PSC_BOOT_DOCTOR_DISABLED:-0}" != 1 ]]; then
 rm -f "$doctor_status"
-doctor_command="set -o pipefail; source '$HOME/.psc-local-env.sh'; if '$HOME/.local/bin/psc-gpu-doctor' 2>&1 | tee -a '$doctor_log'; then printf success > '$doctor_status'; else doctor_rc=\${PIPESTATUS[0]}; printf 'failed:%s' \"\$doctor_rc\" > '$doctor_status'; fi"
+doctor_command="set -o pipefail; source '$HOME/.psc-local-env.sh'; if '$HOME/.local/bin/psc-allocate-doctor' 2>&1 | tee -a '$doctor_log'; then printf success > '$doctor_status'; else doctor_rc=\${PIPESTATUS[0]}; printf 'failed:%s' \"\$doctor_rc\" > '$doctor_status'; fi"
 "${inner_tmux[@]}" send-keys -t zovllm:zovllm-setup -l "$doctor_command"
 "${inner_tmux[@]}" send-keys -t zovllm:zovllm-setup Enter
 
@@ -122,14 +128,14 @@ for ((attempt = 0; attempt < 240; attempt++)); do
 done
 
 if [[ ! -s "$doctor_status" || "$(<"$doctor_status")" != success ]]; then
-    echo "psc-gpu-boot: terminal doctor failed; see $doctor_log" >&2
+    echo "psc-allocate-boot: terminal doctor failed; see $doctor_log" >&2
     exit 1
 fi
 fi
 
 "${inner_tmux[@]}" new-window -d -a -t zovllm:0 -n zovllm-autosave \
     /bin/bash --noprofile --norc
-autosave_command="exec env PATH='$core_bin:/usr/bin:/bin' '$snapshot' autosave ${PSC_GPU_AUTOSAVE_INTERVAL:-300} >> '$HOME/logs/psc/autosave-$job_id.log' 2>&1"
+autosave_command="exec env PATH='$core_bin:/usr/bin:/bin' '$snapshot' autosave ${PSC_ALLOCATE_AUTOSAVE_INTERVAL:-300} >> '$HOME/logs/psc/autosave-$job_id.log' 2>&1"
 "${inner_tmux[@]}" send-keys -t zovllm:zovllm-autosave -l "$autosave_command"
 "${inner_tmux[@]}" send-keys -t zovllm:zovllm-autosave Enter
 "$snapshot" ready
@@ -139,13 +145,13 @@ autosave_command="exec env PATH='$core_bin:/usr/bin:/bin' '$snapshot' autosave $
 # storage only; it never touches $LOCAL or the archives, so it cannot affect
 # psc-local-snapshot restore. Every step is guarded because the allocation must
 # survive a mirror failure -- the mirror is a convenience, the node is not.
-if [[ "${PSC_GPU_MIRROR_DISABLED:-0}" != 1 && -x "$HOME/.local/bin/psc-local-mirror" ]]; then
+if [[ "${PSC_ALLOCATE_MIRROR_DISABLED:-0}" != 1 && -x "$HOME/.local/bin/psc-local-mirror" ]]; then
     if "${inner_tmux[@]}" new-window -d -a -t zovllm:0 -n zovllm-mirror /bin/bash --noprofile --norc 2>/dev/null; then
-        mirror_command="exec env PATH='$HOME/.local/bin:/usr/bin:/bin' '$HOME/.local/bin/psc-local-mirror' watch ${PSC_GPU_MIRROR_INTERVAL:-300}"
+        mirror_command="exec env PATH='$HOME/.local/bin:/usr/bin:/bin' '$HOME/.local/bin/psc-local-mirror' watch ${PSC_ALLOCATE_MIRROR_INTERVAL:-300}"
         "${inner_tmux[@]}" send-keys -t zovllm:zovllm-mirror -l "$mirror_command" 2>/dev/null || true
         "${inner_tmux[@]}" send-keys -t zovllm:zovllm-mirror Enter 2>/dev/null || true
     else
-        echo "psc-gpu-boot: could not start zovllm-mirror; the snapshot mirror is disabled" >&2
+        echo "psc-allocate-boot: could not start zovllm-mirror; the snapshot mirror is disabled" >&2
     fi
 fi
 
@@ -159,13 +165,13 @@ if [[ -n "$outer_socket" && -n "$outer_target" ]]; then
     chmod 600 "$route_tmp"
     mv -f "$route_tmp" "$route_file"
 else
-    echo "psc-gpu-boot: outer tmux route is unavailable; psc-gpu run is disabled" >&2
+    echo "psc-allocate-boot: outer tmux route is unavailable; psc-allocate run is disabled" >&2
 fi
 
-printf 'PSC_GPU_READY job=%s host=%s local=%s socket=%s route=%s\n' \
+printf 'PSC_ALLOCATE_READY job=%s host=%s local=%s socket=%s route=%s\n' \
     "$job_id" "$host_name" "${LOCAL:-unset}" "$socket" "$outer_target"
 if [[ -n "${HPC_ALLOCATION_REQUEST_ID:-}" ]]; then
-    PSC_GPU_STATE_DIR="$state_dir" "$core_bin/psc-allocation" bind "$HPC_ALLOCATION_REQUEST_ID" --job "$job_id" --ready
+    PSC_ALLOCATE_STATE_DIR="$state_dir" "$core_bin/psc-allocation" bind "$HPC_ALLOCATION_REQUEST_ID" --job "$job_id" --ready
 fi
 flock -u 8
 exec 8>&-

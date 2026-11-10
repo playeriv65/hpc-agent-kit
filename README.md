@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Persistent Slurm GPU workspaces for coding agents.**
+**Persistent Slurm workspaces, GPU or CPU-only, for coding agents.**
 
 Give your agent this repository and access to your HPC. It adapts the connection
 and site configuration, sets up nested tmux, and restores verified workspace
@@ -19,7 +19,7 @@ backups when a new allocation starts.
 - Reuse a healthy authenticated SSH connection on routes that require interactive login.
 
 The agent stays on your own machine. The HPC runs the remote helpers and your
-workloads. `AGENTS.md` and `CLAUDE.md` provide the same operating contract.
+workloads. `AGENTS.md` holds the operating contract.
 
 ## Quick start
 
@@ -59,12 +59,15 @@ and [ClawHub](https://clawhub.ai/playeriv65/skills/hpc-workflow).
 See [distribution](docs/distribution.md) for registry publishing and licensing.
 
 After setup, commands have this form. `SITE`, GPU type, job ID and command are
-values from your installation and project:
+values from your installation and project. One `allocate` command requests either
+GPUs or CPU cores; partitions and defaults come from the site configuration:
 
 ```sh
-SITE-gpu --request allocation-001 GPU_TYPE 1 01:00:00
-SITE-gpu allocation allocation-001
-SITE-gpu run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-allocate gpu GPU_TYPE 1 01:00:00 --request allocation-001
+SITE-allocate cpu 16 04:00:00 --mem 32G --request allocation-002
+SITE-allocate allocation allocation-001
+SITE-allocate run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-allocate release --job JOB_ID
 SITE-agent-state doctor --verify-backup
 ```
 
@@ -105,7 +108,7 @@ through private profiles and site acceptance.
 | --- | --- |
 | Login-to-allocated-node SSH | `direct-ssh` adapter; verify site permission and compute access. |
 | PSC allocation-terminal/tmux bridge | `psc-bridge` adapter; another site's terminal behavior needs adaptation. |
-| Account, partitions, QoS, GPU GRES and storage paths | Configure from observed site facts; [MSI](examples/msi.example.json) and [PSC](examples/psc.example.json) are templates. |
+| Account, GPU and CPU partitions, QoS, GPU GRES and storage paths | Configure from observed site facts; [MSI](examples/msi.example.json) and [PSC](examples/psc.example.json) are templates. |
 | Batch-only Slurm sites | Need an allocation backend; current backends use `salloc` + bootstrap `srun --pty`. |
 | Other schedulers | Need a scheduler adapter. |
 
@@ -135,7 +138,7 @@ with the connection method, allocation policy and storage layout. Site reports,
 adapter fixes and clearer operating notes are useful contributions. Keep private
 profiles, credentials, research data and raw logs out of public reports.
 
-Maintain both README languages and identical agent contracts. See the
+Maintain both README languages and the agent contract in `AGENTS.md`. See the
 [maintenance notes](docs/usage.md#maintaining-the-repository) for inventory checks
 and the existing offline test suite. Code and release assets are available in
 [this repository](https://github.com/playeriv65/hpc-agent-kit) and

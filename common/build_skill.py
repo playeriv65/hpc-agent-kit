@@ -9,11 +9,11 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / 'kit' if (ROOT / 'kit').is_dir() else ROOT
 SKILL = ROOT / 'skills/hpc-workflow'
-VERSION = '0.4.1'
+VERSION = '0.5.0'
 RUNTIME = ('profile.py', 'deploy_bundle.py', 'install-release.py', 'shim_exec.py',
     'allocation.py', 'agent-state.py', 'health.py', 'task-runner.sh',
     'local-snapshot.sh', 'snapshot-generation.sh', 'boot-guard.sh',
-    'slurm-gpu.sh', 'slurm-boot.sh', 'sites/psc-boot.sh', 'tests/benchmark_snapshot.py')
+    'slurm-allocate.sh', 'slurm-boot.sh', 'sites/psc-boot.sh', 'tests/benchmark_snapshot.py')
 
 
 def generated():
@@ -21,12 +21,12 @@ def generated():
     for name in RUNTIME:
         text = (ROOT / 'common' / name).read_text(encoding='utf-8')
         if name == 'profile.py':
-            old = "'psc-remote-install/psc-gpu'"
+            old = "'psc-remote-install/psc-allocate'"
             if old not in text:
                 raise ValueError('Review the packaged PSC template path')
-            text = text.replace(old, "'psc-remote-install/psc-gpu.sh'")
+            text = text.replace(old, "'psc-remote-install/psc-allocate.sh'")
         files['scripts/common/' + name] = text
-    files['scripts/psc-remote-install/psc-gpu.sh'] = (ROOT / 'psc-remote-install/psc-gpu').read_text(encoding='utf-8')
+    files['scripts/psc-remote-install/psc-allocate.sh'] = (ROOT / 'psc-remote-install/psc-allocate').read_text(encoding='utf-8')
     for path in (DOCS / 'examples').glob('*.json'):
         files['assets/' + path.name] = path.read_text(encoding='utf-8')
     files['scripts/verify_bundle.py'] = (ROOT / 'common/verify_skill.py').read_text(encoding='utf-8')

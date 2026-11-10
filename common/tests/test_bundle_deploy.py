@@ -18,7 +18,7 @@ deploy = importlib.util.module_from_spec(spec); spec.loader.exec_module(deploy)
 class DeployTests(unittest.TestCase):
     def test_installed_nonexported_archive_configuration_holds_its_lease(self):
         import time
-        config = self.home / '.config/test-lab-gpu/gpu.env'; config.parent.mkdir(parents=True)
+        config = self.home / '.config/test-lab-allocate/allocate.env'; config.parent.mkdir(parents=True)
         archive = self.root / 'configured/work.tar.zst'; archive.parent.mkdir()
         config.write_text("HPC_ARCHIVE='" + str(archive) + "'\n")
         payload = dict(self.payload); payload.pop('archive')
@@ -37,12 +37,12 @@ class DeployTests(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.fake) + ':' + os.environ['PATH'])
         self.site = 'test-lab'
         self.archive = self.root / 'archive/work.tar.zst'
-        files = {'bin/test-lab-gpu': b'#!/usr/bin/env bash\necho release\n',
-                 'config/gpu.env': b'# release configuration\n'}
+        files = {'bin/test-lab-allocate': b'#!/usr/bin/env bash\necho release\n',
+                 'config/allocate.env': b'# release configuration\n'}
         self.payload = dict(site=self.site, archive=str(self.archive), manifest=dict(core_version='test'),
                             files={k:base64.b64encode(v).decode() for k,v in files.items()},
                             hashes={k:hashlib.sha256(v).hexdigest() for k,v in files.items()})
-        self.target = self.home / '.local/bin/test-lab-gpu'; self.target.parent.mkdir(parents=True)
+        self.target = self.home / '.local/bin/test-lab-allocate'; self.target.parent.mkdir(parents=True)
         self.target.write_bytes(b'old release'); self.target.chmod(0o750)
 
     def run_install(self, payload=None, injection=''):
@@ -60,33 +60,33 @@ class DeployTests(unittest.TestCase):
 failed_once = False
 def atomic(path, data, mode=0o600):
     global failed_once
-    if str(path).endswith('/.config/test-lab-gpu/gpu.env') and not failed_once:
+    if str(path).endswith('/.config/test-lab-allocate/allocate.env') and not failed_once:
         failed_once = True
         raise OSError('simulated full filesystem')
     return original_atomic(path, data, mode)
 '''
         self.payload['files']['bin/test-lab-new'] = base64.b64encode(b'new helper').decode()
         self.payload['hashes']['bin/test-lab-new'] = hashlib.sha256(b'new helper').hexdigest()
-        config = self.payload['files'].pop('config/gpu.env'); self.payload['files']['config/gpu.env'] = config
+        config = self.payload['files'].pop('config/allocate.env'); self.payload['files']['config/allocate.env'] = config
         result = self.run_install(injection=injection)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.target.read_bytes(), b'old release')
         self.assertEqual(self.target.stat().st_mode & 0o777, 0o750)
         self.assertFalse((self.home / '.local/bin/test-lab-new').exists())
-        journal = json.loads((self.home / '.local/state/test-lab-gpu/deployment.json').read_text())
+        journal = json.loads((self.home / '.local/state/test-lab-allocate/deployment.json').read_text())
         self.assertEqual(journal['phase'], 'rolled_back')
 
     def test_forced_process_loss_recovers_and_explicit_rollback_restores_prior_manifest(self):
-        manifest = self.home / '.config/test-lab-gpu/core-manifest.json'; manifest.parent.mkdir(parents=True)
+        manifest = self.home / '.config/test-lab-allocate/core-manifest.json'; manifest.parent.mkdir(parents=True)
         manifest.write_bytes(b'old manifest')
         injection = '''original_atomic = atomic
 def atomic(path, data, mode=0o600):
     original_atomic(path, data, mode)
-    if str(path).endswith('/.local/bin/test-lab-gpu'): os._exit(99)
+    if str(path).endswith('/.local/bin/test-lab-allocate'): os._exit(99)
 '''
         lost = self.run_install(injection=injection)
         self.assertEqual(lost.returncode, 99, lost.stdout)
-        state = self.home / '.local/state/test-lab-gpu'
+        state = self.home / '.local/state/test-lab-allocate'
         guard = state / 'allocations/hpc-deployment-guard.json'
         self.assertTrue(guard.exists())
         # Simulate an older allocation entry that does not know the new journal.
@@ -112,10 +112,41 @@ def atomic(path, data, mode=0o600):
         self.assertEqual(self.target.read_bytes(), b'old release')
         self.assertEqual(manifest.read_bytes(), b'old manifest')
 
+    def test_retired_paths_move_into_backup_and_return_on_rollback(self):
+        old_helper = self.home / '.local/bin/test-lab-old'; old_helper.write_bytes(b'old helper')
+        old_state = self.home / '.local/state/test-lab-old'; (old_state / 'allocations').mkdir(parents=True)
+        (old_state / 'allocations/done.json').write_text(json.dumps(dict(phase='terminal')))
+        old_config = self.home / '.config/test-lab-old'; old_config.mkdir(parents=True)
+        (old_config / 'settings.env').write_text('OLD=1\n')
+        retire = ['.local/bin/test-lab-old', '.local/state/test-lab-old', '.config/test-lab-old', '.local/bin/absent']
+        committed = self.run_install(dict(self.payload, retire=retire))
+        self.assertEqual(committed.returncode, 0, committed.stdout)
+        proof = json.loads(committed.stdout.strip().splitlines()[-1])
+        self.assertEqual(proof['retired'], sorted(retire[:3]))
+        self.assertFalse(old_helper.exists() or old_state.exists() or old_config.exists())
+        backup = Path(proof['backup'])
+        self.assertEqual((backup / 'retired/.config/test-lab-old/settings.env').read_text(), 'OLD=1\n')
+        result = self.run_install(dict(self.payload, rollback=str(backup)))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(old_helper.read_bytes(), b'old helper')
+        self.assertEqual((old_config / 'settings.env').read_text(), 'OLD=1\n')
+        self.assertTrue((old_state / 'allocations/done.json').exists())
+        self.assertEqual(self.target.read_bytes(), b'old release')
+
+    def test_retired_state_with_unresolved_request_refuses_deployment(self):
+        old_state = self.home / '.local/state/test-lab-old'; (old_state / 'allocations').mkdir(parents=True)
+        (old_state / 'allocations/pending.json').write_text(json.dumps(dict(phase='dispatched', job_id=None)))
+        for retire in (['.local/state/test-lab-old'], ['/etc/passwd'], ['.local/state/test-lab-allocate'], ['.local/bin/test-lab-allocate']):
+            with self.subTest(retire=retire):
+                result = self.run_install(dict(self.payload, retire=retire))
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(self.target.read_bytes(), b'old release')
+                self.assertTrue((old_state / 'allocations/pending.json').exists())
+
     def test_backup_tampering_and_foreign_lease_refuse_changes(self):
         committed = self.run_install(); self.assertEqual(committed.returncode, 0, committed.stdout)
         backup = Path(json.loads(committed.stdout.strip().splitlines()[-1])['backup'])
-        (backup / 'bin/test-lab-gpu').write_bytes(b'tampered')
+        (backup / 'bin/test-lab-allocate').write_bytes(b'tampered')
         prior = self.target.read_bytes()
         result = self.run_install(dict(self.payload, rollback=str(backup)))
         self.assertNotEqual(result.returncode, 0); self.assertEqual(self.target.read_bytes(), prior)
@@ -138,12 +169,12 @@ def atomic(path, data, mode=0o600):
             manifest = dict(site=data['name'], core_version='0.3.0', files={name: hashlib.sha256(body.encode()).hexdigest() for name, body in files.items()})
             (bundle / 'manifest.json').write_text(json.dumps(manifest))
             _, payload = deploy.freeze(bundle)
-            changed = bundle / ('bin/' + data['name'] + '-gpu'); changed.write_text('changed after freeze')
+            changed = bundle / ('bin/' + data['name'] + '-allocate'); changed.write_text('changed after freeze')
             with self.assertRaisesRegex(ValueError, 'Bundle changed'):
                 deploy.freeze(bundle)
             fake = root / 'fake'; fake.mkdir(); busy = root / 'busy'
             queue = fake / 'squeue'; queue.write_text('#!/bin/bash\nif [[ -f "' + str(busy) + '" ]]; then echo "123|RUNNING"; fi\n'); queue.chmod(0o700)
-            target = home / '.local/bin' / (data['name'] + '-gpu'); target.parent.mkdir(parents=True); target.write_text('old release')
+            target = home / '.local/bin' / (data['name'] + '-allocate'); target.parent.mkdir(parents=True); target.write_text('old release')
             env = dict(os.environ, HOME=str(home), PATH=str(fake) + ':' + os.environ['PATH'])
             script = 'PAYLOAD = ' + repr(base64.b64encode(json.dumps(payload).encode()).decode()) + '\n' + deploy.REMOTE
             result = subprocess.run(['python3', '-'], input=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)

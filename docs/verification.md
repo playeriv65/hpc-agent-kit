@@ -4,7 +4,7 @@ MSI and PSC Bridges-2 are reference deployments of the shared workspace design.
 A generated installation still needs its own
 [site acceptance](../skills/hpc-workflow/references/acceptance.md).
 
-## Source-site GPU acceptance
+## Source-site allocation acceptance
 
 | Site | Evidence | Version boundary |
 | --- | --- | --- |
@@ -25,9 +25,20 @@ rollback, check coverage reporting, expected-compaction classification, identica
 agent contracts and public generated-workspace regression tests. The historical
 GPU acceptance above is not a new v0.4.0 GPU certification.
 
+## Public version 0.5.0
+
+Version 0.5.0 replaces the GPU-only allocator with one `allocate` command for
+GPU and CPU-only allocations. Partitions, limits and defaults per kind come from
+the site configuration; CPU allocations boot without the CUDA toolkit step. The
+helper, state, configuration and tmux names change from `gpu` to `allocate`
+(`SITE-allocate`, `allocate.env`, window `allocate`, socket `alloc-JOB_ID`) with
+no aliases. `release` ends a job after owner and request-identity checks, and a
+release may retire helpers of an earlier layout into its backup. The contract
+lives only in `AGENTS.md`.
+
 The Linux suite uses synthetic data and stub schedulers with real tmux. Windows
-checks verify the public inventory, contracts and syntax compatibility. These
-tests do not consume GPUs and do not certify site permissions, actual compute
+checks verify the public inventory, versions and syntax compatibility. These
+tests do not consume allocations and do not certify site permissions, actual compute
 access or remote storage. Current CI results are available in
 [GitHub Actions](https://github.com/playeriv65/hpc-agent-kit/actions/workflows/validate.yml).
 
@@ -36,6 +47,6 @@ uv run python -m unittest discover -s common/tests -v
 uv run python common/check_repo.py
 ```
 
-Keep fixture tests, installed-site checks and real GPU acceptance distinct in
+Keep fixture tests, installed-site checks and real allocation acceptance distinct in
 reports. Abrupt node loss can recover only already committed backups. Keep
 checkpoints and results on persistent storage through explicit experiment options.

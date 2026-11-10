@@ -18,7 +18,11 @@ grants. Validate compute capabilities on compute, not only on login nodes.
 ## Operating invariants
 
 - Keep allocation ownership in login tmux and tasks in job-specific compute tmux.
-  After bootstrap, route work through `SITE-gpu run`; do not create extra steps.
+  Request resources with `SITE-allocate gpu ...` or `SITE-allocate cpu ...`;
+  partitions, limits and defaults come from the site's `allocate.env`. After
+  bootstrap, route work through `SITE-allocate run`; do not create extra steps.
+  End a job with `SITE-allocate release --job ID`, which checks owner and request
+  identity before cancelling.
 - Persist an allocation request ID before submitting. Replay that ID with the
   same parameters after a disconnect. An unknown scheduler result or ambiguous
   reservation must not produce another allocation or deletion of its record.

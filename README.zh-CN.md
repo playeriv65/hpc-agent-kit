@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**让 coding agent 用上可持续连接、自动恢复的 Slurm GPU 工作环境。**
+**让 coding agent 用上可持续连接、自动恢复的 Slurm 工作环境，GPU 和纯 CPU 分配都支持。**
 
 把这个仓库和 HPC 访问方式交给 Agent。它会按站点实际情况适配连接和配置，建立
 嵌套 tmux，并在新的资源申请获批后恢复经过校验的工作目录备份。
@@ -17,8 +17,7 @@
 - 断线后复用申请 ID 和任务 ID，避免重复申请、重复启动任务。
 - 需要交互登录时，让普通命令复用健康的已认证 SSH 连接。
 
-Agent 留在你自己的机器上；HPC 运行远程辅助脚本和任务。`AGENTS.md` 与 `CLAUDE.md`
-提供相同的操作契约。
+Agent 留在你自己的机器上；HPC 运行远程辅助脚本和任务。操作契约在 `AGENTS.md`。
 
 ## 开始使用
 
@@ -55,12 +54,14 @@ Agent 直接使用包内脚本，并通过文件清单校验其完整性。已�
 [分发说明](docs/distribution.md)。
 
 建立环境后，命令采用下面的形式。`SITE`、GPU 类型、作业 ID 和命令根据实际安装
-与项目填写：
+与项目填写。同一个 `allocate` 命令申请 GPU 或 CPU 核；分区和默认值来自站点配置：
 
 ```sh
-SITE-gpu --request allocation-001 GPU_TYPE 1 01:00:00
-SITE-gpu allocation allocation-001
-SITE-gpu run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-allocate gpu GPU_TYPE 1 01:00:00 --request allocation-001
+SITE-allocate cpu 16 04:00:00 --mem 32G --request allocation-002
+SITE-allocate allocation allocation-001
+SITE-allocate run --job JOB_ID --request task-001 --wait train -- COMMAND ...
+SITE-allocate release --job JOB_ID
 SITE-agent-state doctor --verify-backup
 ```
 
@@ -97,7 +98,7 @@ flowchart LR
 | --- | --- |
 | 从登录节点 SSH 到获配计算节点 | 使用 `direct-ssh` 适配器；需确认站点允许且计算节点访问已验证。 |
 | PSC 资源申请终端与 tmux 桥接 | 使用 `psc-bridge` 适配器；其他站点的终端行为需要适配。 |
-| 账号、分区、QoS、GPU GRES 与存储路径 | 根据实际探测配置；[MSI](examples/msi.example.json)和 [PSC](examples/psc.example.json)是模板。 |
+| 账号、GPU 与 CPU 分区、QoS、GPU GRES 与存储路径 | 根据实际探测配置；[MSI](examples/msi.example.json)和 [PSC](examples/psc.example.json)是模板。 |
 | 只允许批作业的 Slurm 站点 | 需要资源申请后端；当前后端使用 `salloc` + 启动用的 `srun --pty`。 |
 | 其他调度系统 | 需要对应的调度器适配器。 |
 
@@ -125,7 +126,7 @@ GNU 工具。详见[运行条件与操作说明](docs/usage.md)。
 说明连接方式、资源申请规则和存储布局。站点试用报告、适配器修复和更清楚的操作
 说明都很有帮助。公开报告不要包含私有 profile、认证材料、研究数据或原始日志。
 
-同步维护两个 README 语言版本和相同的 Agent 契约。文件清单检查和已有离线测试
+同步维护两个 README 语言版本和 `AGENTS.md` 中的 Agent 契约。文件清单检查和已有离线测试
 见[维护说明](docs/usage.md#maintaining-the-repository)。代码和发布包分别位于
 [本仓库](https://github.com/playeriv65/hpc-agent-kit)和
 [Releases](https://github.com/playeriv65/hpc-agent-kit/releases)。

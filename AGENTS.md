@@ -1,9 +1,8 @@
 # Agent operating contract
 
-`AGENTS.md` and `CLAUDE.md` are byte-identical copies. Update both together and
-run `uv run python common/check_repo.py`; Git and ZIP distributions preserve
-copies, so correctness never depends on a local hardlink.
-For intentional edits, refresh existing allowlisted hashes with
+This file is the agent operating contract; Claude Code and Codex read it directly.
+After edits run `uv run python common/check_repo.py`. For intentional edits,
+refresh existing allowlisted hashes with
 `uv run python common/check_repo.py --refresh` and run the checks again.
 
 ## Deliver the user's working site
@@ -24,7 +23,11 @@ grants. Validate compute capabilities on compute, not only on login nodes.
 ## Operating invariants
 
 - Keep allocation ownership in login tmux and tasks in job-specific compute tmux.
-  After bootstrap, route work through `SITE-gpu run`; do not create extra steps.
+  Request resources with `SITE-allocate gpu ...` or `SITE-allocate cpu ...`;
+  partitions, limits and defaults come from the site's `allocate.env`. After
+  bootstrap, route work through `SITE-allocate run`; do not create extra steps.
+  End a job with `SITE-allocate release --job ID`, which checks owner and request
+  identity before cancelling.
 - Persist an allocation request ID before submitting. Replay that ID with the
   same parameters after a disconnect. An unknown scheduler result or ambiguous
   reservation must not produce another allocation or deletion of its record.
@@ -71,6 +74,6 @@ changing maintained sources, run `common/build_skill.py` and then
 Standalone skill operation needs no external checkout. Keep its private outputs
 outside the installed directory and use its packaged integrity verifier.
 The suite renders actual helpers and uses real tmux, synthetic storage and stub
-schedulers; it consumes no GPUs. Follow the skill's acceptance procedure for
+schedulers; it consumes no allocations. Follow the skill's acceptance procedure for
 authorized live checks. Report fixture tests, actual installation checks and real
-GPU acceptance separately. Keep pending validation visible in the handoff.
+allocation acceptance separately. Keep pending validation visible in the handoff.

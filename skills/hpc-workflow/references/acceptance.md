@@ -1,7 +1,7 @@
 # Acceptance evidence
 
 Use synthetic data, an isolated namespace/state directory and an independent
-archive. Run local/template tests before consuming a GPU. Keep exact generated
+archive. Run local/template tests before consuming an allocation. Keep exact generated
 bytes, commands and logs so the result can be reproduced.
 
 1. Prove identity, supported authentication reuse and scheduler observation.
@@ -26,7 +26,7 @@ bytes, commands and logs so the result can be reproduced.
    Slurm terminal state separately from forced-timer unit checks.
 6. Ask a fresh agent with no task history to use the skill and raw site evidence
    to produce a valid profile and staged bundle. Review its artifacts and decisions.
-   Never count a fixture scheduler as a real GPU lifecycle test.
+   Never count a fixture scheduler as a real allocation lifecycle test.
 
 Use the lowest-cost eligible GPU with an available slot. If allocation is delayed
 or policy denies the partition, preserve that result and mark the GPU check

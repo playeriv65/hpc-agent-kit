@@ -50,8 +50,6 @@ def validate(profile):
     for gpu, data in catalog.items():
         if not re.fullmatch(r'[a-z][a-z0-9-]*', gpu):
             raise ValueError('Invalid GPU key')
-        if adapter == 'psc-bridge' and gpu not in ('h100', 'a100', 'v100', 'l40s'):
-            raise ValueError('The PSC bridge adapter requires adaptation for this GPU key')
         partitions = data['partition'].split(',')
         if (not re.fullmatch(r'[A-Za-z0-9_-]+', data['gres']) or
                 not partitions or len(partitions) != len(set(partitions)) or
@@ -59,12 +57,23 @@ def validate(profile):
             raise ValueError('Invalid GRES or partition')
         if not isinstance(data['max_count'], int) or data['max_count'] < 1:
             raise ValueError('GPU capacity must be established')
-        qos = data.get('qos', '')
-        if qos:
-            if qos not in verified['project_qos'] or any(qos not in verified['partition_qos'].get(partition, []) for partition in partitions):
-                raise ValueError('QoS is not permitted by both project and partition: ' + qos)
-        elif not verified.get('default_qos_allowed'):
-            raise ValueError('A permitted explicit QoS or verified default QoS is required')
+        check_qos(verified, data.get('qos', ''), partitions)
+    cpu = allocation.get('cpu')
+    if cpu is not None:
+        if not re.fullmatch(r'[A-Za-z0-9_-]+', cpu['partition']):
+            raise ValueError('Invalid CPU partition')
+        for key in ('cores', 'max_cores'):
+            if not isinstance(cpu[key], int) or cpu[key] < 1:
+                raise ValueError('CPU core limits must be established')
+        if cpu['cores'] > cpu['max_cores']:
+            raise ValueError('Default CPU cores exceed the partition limit')
+        if cpu.get('memory') is not None and not re.fullmatch(r'[1-9][0-9]*[MG]?', cpu['memory']):
+            raise ValueError('CPU memory must be explicit, or null when the partition assigns it per core')
+        if not re.fullmatch(r'[0-9]+:[0-5][0-9]:[0-5][0-9]', cpu.get('walltime', allocation['walltime'])):
+            raise ValueError('Invalid CPU walltime')
+        if not re.fullmatch(r'[A-Za-z0-9_&|,-]*', cpu.get('constraint', '')):
+            raise ValueError('Invalid CPU constraint')
+        check_qos(verified, cpu.get('qos', ''), [cpu['partition']])
     transport = profile['transport']['exec_argv']
     if not isinstance(transport, list) or not transport or not all(isinstance(x, str) and x and '\n' not in x and '<' not in x for x in transport):
         raise ValueError('A supported authenticated exec argv is required')
@@ -76,6 +85,42 @@ def validate(profile):
     return profile
 
 
+def check_qos(verified, qos, partitions):
+    if qos:
+        if qos not in verified['project_qos'] or any(qos not in verified['partition_qos'].get(partition, []) for partition in partitions):
+            raise ValueError('QoS is not permitted by both project and partition: ' + qos)
+    elif not verified.get('default_qos_allowed'):
+        raise ValueError('A permitted explicit QoS or verified default QoS is required')
+
+
+def allocate_settings(profile, prefix, flavor):
+    """Translate the reviewed allocation section into PREFIX_ALLOCATE_* settings."""
+    allocation = profile['allocation']
+    key = prefix + '_ALLOCATE_'
+    scratch = allocation.get('local_scratch', '')
+    values = {key + 'ACCOUNT': allocation['account'], key + 'GPU_TYPES': ' '.join(allocation['gpus']),
+              key + 'GPU_DEFAULT_TYPE': allocation['default_gpu'], key + 'GPU_DEFAULT_COUNT': '1',
+              key + 'GPU_WALLTIME': allocation['walltime'], key + 'GPU_CPUS': str(allocation['cpus']),
+              key + 'GPU_MEMORY': allocation['memory'], key + 'GPU_TMP': scratch}
+    for gpu, data in allocation['gpus'].items():
+        scope = key + 'GPU_' + re.sub(r'[^A-Z0-9]', '_', gpu.upper()) + '_'
+        values.update({scope + 'PARTITION': data['partition'], scope + 'GRES': data['gres'], scope + 'QOS': data.get('qos', ''),
+                       scope + 'COUNTS': ' '.join(str(count) for count in range(1, data['max_count'] + 1))})
+        if flavor == 'psc':
+            values[scope + 'NAME_PATTERN'] = data.get('name_pattern', gpu.upper())
+    cpu = allocation.get('cpu')
+    if cpu is not None:
+        values.update({key + 'CPU_PARTITION': cpu['partition'], key + 'CPU_QOS': cpu.get('qos', ''),
+                       key + 'CPU_CORES': str(cpu['cores']), key + 'CPU_MAX_CORES': str(cpu['max_cores']),
+                       key + 'CPU_WALLTIME': cpu.get('walltime', allocation['walltime']),
+                       key + 'CPU_CONSTRAINT': cpu.get('constraint', ''), key + 'CPU_TMP': scratch})
+        if cpu.get('memory') is None:
+            values[key + 'CPU_MEMORY_REQUEST'] = '0'
+        else:
+            values[key + 'CPU_MEMORY'] = cpu['memory']
+    return values
+
+
 def replace_tokens(body, name, adapter):
     return body.replace('@SITE@', name).replace('@PREFIX@', name.upper().replace('-', '_')).replace('@ADAPTER@', adapter)
 
@@ -85,61 +130,43 @@ def render(profile):
     name = profile['name']; prefix = name.upper().replace('-', '_')
     flavor = 'psc' if profile['adapter'] == 'psc-bridge' else 'msi'
     files = {}
-    for source, suffix in [('local-snapshot.sh', 'local-snapshot'), ('task-runner.sh', 'gpu-inner-run'),
+    for source, suffix in [('local-snapshot.sh', 'local-snapshot'), ('task-runner.sh', 'allocate-inner-run'),
                            ('agent-state.py', 'agent-state'), ('allocation.py', 'allocation'), ('health.py', 'health')]:
         body = (ROOT / 'common' / source).read_text(encoding='utf-8')
         if source == 'local-snapshot.sh':
             body = body.replace('@GENERATION_ENGINE@', (ROOT / 'common/snapshot-generation.sh').read_text(encoding='utf-8'))
         files['bin/' + name + '-' + suffix] = replace_tokens(body, name, flavor)
     if flavor == 'msi':
-        gpu = (ROOT / 'common/slurm-gpu.sh').read_text(encoding='utf-8')
+        allocator = (ROOT / 'common/slurm-allocate.sh').read_text(encoding='utf-8')
         boot = (ROOT / 'common/slurm-boot.sh').read_text(encoding='utf-8')
     else:
-        gpu = (ROOT / 'psc-remote-install/psc-gpu').read_text(encoding='utf-8')
-        default = profile['allocation']['default_gpu']
-        gpu = gpu.replace('local gpu_type=h100 gpu_gres=h100-80 gpu_partition=GPU-shared gpu_pattern=H100 gpu_qos=""',
-                          'local gpu_type=' + shlex.quote(default) + ' gpu_gres="" gpu_partition="" gpu_pattern="" gpu_qos="" max_gpu=1')
-        start = gpu.index('    case "$gpu_type" in'); end = gpu.index('    export PSC_GPU_EXPECTED_GPU_NAME_PATTERN', start)
-        cases = ['    case "$gpu_type" in']
-        for key, data in profile['allocation']['gpus'].items():
-            cases.append('        %s) gpu_gres=%s; gpu_partition=%s; gpu_qos=%s; gpu_pattern=%s; max_gpu=%s ;;' %
-                (key, shlex.quote(data['gres']), shlex.quote(data['partition']), shlex.quote(data.get('qos', '')),
-                 shlex.quote(data.get('name_pattern', key.upper())), data['max_count']))
-        cases += ['        *) die "GPU type absent from verified profile" ;;', '    esac', '    [[ "${1:-1}" -le "$max_gpu" ]] || die "GPU count exceeds site profile"']
-        gpu = gpu[:start] + '\n'.join(cases) + '\n' + gpu[end:]
-        gpu = gpu.replace('local gpu_count="${1:-2}"', 'local gpu_count="${1:-1}"')
-        gpu = gpu.replace('[[ "$gpu_type" != a100 || "$gpu_count" == 1 ]] || die "GPU-dev A100 requires one GPU"', ': # Partition-specific count limits come from the verified profile.')
-        gpu = gpu.replace('local walltime="${2:-08:00:00}"', 'local walltime="${2:-' + profile['allocation']['walltime'] + '}"')
+        allocator = (ROOT / 'psc-remote-install/psc-allocate').read_text(encoding='utf-8')
         boot = (ROOT / 'common/sites/psc-boot.sh').read_text(encoding='utf-8')
-        for old, new in (('$HOME/.psc-local-env.sh', '$HOME/.config/psc-gpu/local-env.sh'),
-                         ('$HOME/.tmux.inner.conf', '$HOME/.config/psc-gpu/tmux.compute.conf')):
+        for old, new in (('$HOME/.psc-local-env.sh', '$HOME/.config/psc-allocate/local-env.sh'),
+                         ('$HOME/.tmux.inner.conf', '$HOME/.config/psc-allocate/tmux.compute.conf')):
             boot = boot.replace(old, new)
-        gpu = gpu.replace('$HOME/.tmux.conf', '$HOME/.config/psc-gpu/tmux.login.conf')
-        gpu = re.sub(r'\bpsc\b', name, gpu).replace('PSC', prefix)
+        allocator = allocator.replace('$HOME/.tmux.conf', '$HOME/.config/psc-allocate/tmux.login.conf')
+        allocator = re.sub(r'\bpsc\b', name, allocator).replace('PSC', prefix)
         boot = re.sub(r'\bpsc\b', name, boot).replace('PSC', prefix)
-    files['bin/' + name + '-gpu'] = replace_tokens(gpu, name, flavor)
+    files['bin/' + name + '-allocate'] = replace_tokens(allocator, name, flavor)
     boot = boot.replace('@BOOT_GUARD@', (ROOT / 'common/boot-guard.sh').read_text(encoding='utf-8'))
-    files['bin/' + name + '-gpu-boot'] = replace_tokens(boot, name, flavor)
+    files['bin/' + name + '-allocate-boot'] = replace_tokens(boot, name, flavor)
     values = {'HPC_PROFILE_HASH': hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest(),
-        'HPC_ACCOUNT': profile['allocation']['account'], 'HPC_CPUS': str(profile['allocation']['cpus']),
-        'HPC_MEMORY': profile['allocation']['memory'], 'HPC_WALLTIME': profile['allocation']['walltime'],
-        'HPC_DEFAULT_GPU': profile['allocation']['default_gpu'],
         'HPC_LOCAL_TEMPLATE': profile['storage']['local_template'], 'HPC_LOCAL_PREFIX': profile['storage']['local_prefix'],
         'HPC_ARCHIVE': profile['storage']['archive'], 'HPC_RESULTS': profile['storage']['results'],
-        'HPC_LOCAL_SCRATCH_REQUEST': profile['allocation'].get('local_scratch', ''),
         'HPC_OUTER_SOCKET': name + '-login', 'HPC_OUTER_SESSION': name + '-login',
-        prefix + '_GPU_AUTOSAVE_INTERVAL': '300'}
+        prefix + '_ALLOCATE_AUTOSAVE_INTERVAL': '300'}
+    values.update(allocate_settings(profile, prefix, flavor))
     policy = profile.get('snapshot', {})
-    for key, suffix in dict(interval='GPU_AUTOSAVE_INTERVAL', compact_seconds='LOCAL_SNAPSHOT_COMPACT_SECONDS',
+    for key, suffix in dict(interval='ALLOCATE_AUTOSAVE_INTERVAL', compact_seconds='LOCAL_SNAPSHOT_COMPACT_SECONDS',
                             end_margin='LOCAL_SNAPSHOT_END_MARGIN', generations_keep='LOCAL_SNAPSHOT_GENERATIONS_KEEP',
                             full_families_keep='LOCAL_SNAPSHOT_FULL_FAMILIES_KEEP',
                             max_incremental_ratio='LOCAL_SNAPSHOT_MAX_INCREMENTAL_RATIO',
                             home_budget_gb='LOCAL_SNAPSHOT_HOME_BUDGET_GB').items():
         if key in policy: values[prefix + '_' + suffix] = str(policy[key])
     if flavor == 'psc':
-        values.update({prefix + '_ACCOUNT': profile['allocation']['account'], prefix + '_CPUS_PER_TASK': str(profile['allocation']['cpus']),
-                       prefix + '_MEMORY': profile['allocation']['memory'], prefix + '_TOOLCHAIN_DISABLED': '1',
-                       prefix + '_BOOT_DOCTOR_DISABLED': '1', prefix + '_GPU_MIRROR_DISABLED': '1'})
+        values.update({prefix + '_TOOLCHAIN_DISABLED': '1', prefix + '_BOOT_DOCTOR_DISABLED': '1',
+                       prefix + '_ALLOCATE_MIRROR_DISABLED': '1'})
         files['config/local-env.sh'] = '''# Generated cache and local-storage setup; no HOME symlink mutation.
 expand_path() { python3 -c 'import os,sys; p=os.path.expandvars(sys.argv[1]); assert "$" not in p and os.path.isabs(p); print(p)' "$1"; }
 export LOCAL="$(expand_path "$HPC_LOCAL_TEMPLATE")"
@@ -150,9 +177,7 @@ export UV_CACHE_DIR="$LOCAL/cache/$USER/uv" TMPDIR="$LOCAL/tmp/$USER" UV_LINK_MO
 '''
     config = ['# Generated from a reviewed profile. No passwords or tokens belong here.']
     config += [key + '=' + shlex.quote(value) for key, value in sorted(values.items())]
-    for field, array in [('gres', 'HPC_GPU_GRES'), ('partition', 'HPC_GPU_PARTITION'), ('qos', 'HPC_GPU_QOS'), ('max_count', 'HPC_GPU_MAX_COUNT')]:
-        config.append('declare -A ' + array + '=(' + ' '.join('[' + key + ']=' + shlex.quote(str(data.get(field, ''))) for key, data in profile['allocation']['gpus'].items()) + ')')
-    files['config/gpu.env'] = '\n'.join(config) + '\n'
+    files['config/allocate.env'] = '\n'.join(config) + '\n'
     files['config/tmux.compute.conf'] = 'set -g prefix C-a\nunbind C-b\nbind C-a send-prefix\nset -g history-limit 50000\n'
     files['config/tmux.login.conf'] = 'set -g prefix C-b\nset -g history-limit 50000\n'
     files['profile.json'] = json.dumps(profile, indent=2, sort_keys=True) + '\n'
@@ -170,7 +195,7 @@ def main():
         parser.error('Output must be a new or empty staging directory')
     for relative, body in files.items():
         path = root / relative; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(body, encoding='utf-8', newline='\n')
-    manifest = dict(schema_version=1, core_version='0.4.0', site=profile['name'],
+    manifest = dict(schema_version=1, core_version='0.5.0', site=profile['name'],
                     files={key: hashlib.sha256(body.encode()).hexdigest() for key, body in files.items()})
     (root / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     print(json.dumps(dict(site=profile['name'], bundle=str(root.resolve()), file_count=len(files))))

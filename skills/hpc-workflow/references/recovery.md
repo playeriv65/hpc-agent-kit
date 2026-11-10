@@ -8,13 +8,13 @@ logs and private profiles. Do not infer job completion from a disconnect.
 | Authentication unavailable | Use the installation's explicit login operation once; notify the user of MFA and wait. Ordinary operations must not initiate another challenge. |
 | Scheduler query fails | Keep state unknown. Retry read-only observation; do not allocate replacement resources. |
 | Submission outcome unclear | Reconcile the same request with queue, owner/comment and accounting evidence. Preserve the reservation if no terminal result can be established. |
-| Job running, compute unreachable | Inspect the allocation pane, route identity and recorded node. Reconnect to the same job; do not kill tmux or request another GPU. |
+| Job running, compute unreachable | Inspect the allocation pane, route identity and recorded node. Reconnect to the same job; do not kill tmux or request another allocation. |
 | No active allocation | Compute/autosave/storage checks are not performed. A zero command exit alone does not prove a healthy workspace. |
 | Autosave stopped or stale | Inspect autosave logs, current host/PID/start identity and space/quota. Start through the same snapshot helper only when no other writer owns the archive. |
 | Incremental requests compaction | Allow the immediate full-save fallback. This is maintenance; a failed full-save fallback is a real backup failure. |
 | Newest generation corrupt | Restore uses a verified older family. Keep corruption evidence and report the restored generation; preserve complete experiment checkpoints separately. |
 | Space/quota insufficient | Report paths, sizes, limits and required working space. Adjust scoped storage configuration; do not delete research data or reduce retention silently. |
-| Deployment interrupted | Inspect `~/.local/state/SITE-gpu/deployment.json`. Replay the same frozen bundle when quiescent; the installer first restores the interrupted prior installation. |
+| Deployment interrupted | Inspect `~/.local/state/SITE-allocate/deployment.json`. Replay the same frozen bundle when quiescent; the installer first restores the interrupted prior installation. |
 
 Upgrade with a new immutable staging directory. Verify the profile and hashes;
 do not change account, archive, namespace or transport as an incidental upgrade.

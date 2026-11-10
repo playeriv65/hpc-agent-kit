@@ -19,7 +19,7 @@ Select the agent and installation scope using the CLI prompts. The installed
 skill uses its bundled helpers and runs
 `uv run --no-project --python 3.12 python scripts/verify_bundle.py` from its own
 directory. Installing the package does not authenticate to a cluster, deploy
-remote helpers or request GPUs; the agent performs setup within the user's scope.
+remote helpers or request allocations; the agent performs setup within the user's scope.
 
 To inspect available skills without installing them:
 
@@ -92,7 +92,7 @@ authentication data out of the canonical skill and other registry packages. Use
 
 The verified SkillHub CLI `0.1.9` requires browser OAuth for its first login. Its
 file scanner excludes extensionless files, so the complete package uses
-`LICENSE.txt` and names its PSC shell template `psc-gpu.sh`. Check
+`LICENSE.txt` and names its PSC shell template `psc-allocate.sh`. Check
 the full scanned inventory before uploading. Linking, staging and local validation
 do not establish authentication, a successful upload or public availability.
 

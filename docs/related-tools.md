@@ -12,6 +12,6 @@ They are independent projects, not dependencies or compatibility certifications.
 | [HPC Skill Hub](https://github.com/hwang595/hpc-skill-hub) | Registry of reusable HPC workflow skills. | Clear links between the entry page, catalog and deeper documentation. |
 | [stui](https://github.com/Antvirf/stui) | Terminal interface for inspecting and managing Slurm clusters. | Describing observable actions and giving a direct installation/usage path. |
 
-HPC Agent Kit focuses on establishing a persistent GPU workspace and carrying
+HPC Agent Kit focuses on establishing a persistent GPU or CPU workspace and carrying
 verified workspace snapshots between allocations. Other Slurm sites adapt the
 shared core through private profiles and tested access backends.

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 site='@SITE@'
 adapter='@ADAPTER@'
-state_dir="${@PREFIX@_GPU_STATE_DIR:-$HOME/.local/state/$site-gpu}"
+state_dir="${@PREFIX@_ALLOCATE_STATE_DIR:-$HOME/.local/state/$site-allocate}"
 job_id='' window='' payload='' request_id='' ack_request='' mode=run wait_for_completion=false
 while (($#)); do
     case "$1" in
@@ -24,12 +24,12 @@ request_id="${request_id:-$(date +%s%N)-$$}"
 ack_request="${ack_request:-$request_id}"
 [[ "$ack_request" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 2
 session=work
-conf="$HOME/.config/@SITE@-gpu/tmux.compute.conf"
+conf="$HOME/.config/@SITE@-allocate/tmux.compute.conf"
 workspace="${@PREFIX@_WORKSPACE:-$HOME}"
 if [[ "$adapter" == psc ]]; then
     session=zovllm; conf="$HOME/.tmux.inner.conf"; workspace="${LOCAL:-$HOME}"
 fi
-socket="gpu-$job_id"
+socket="alloc-$job_id"
 inner_tmux=(/usr/bin/tmux -L "$socket" -f "$conf")
 target="$session:$window"
 request_dir="$state_dir/requests/$request_id"
@@ -54,7 +54,7 @@ flock -w 15 9 || fail 'task dispatch lock timeout'
 if [[ "$mode" == close ]]; then
     case "$window" in setup|autosave|zovllm-setup|zovllm-autosave|zovllm-mirror) fail 'protected window' ;; esac
     pane_pid="$("${inner_tmux[@]}" display-message -p -t "$target" '#{pane_pid}')"
-    busy="$("${inner_tmux[@]}" show-options -wqv -t "$target" @hpc_gpu_busy)"
+    busy="$("${inner_tmux[@]}" show-options -wqv -t "$target" @hpc_task_busy)"
     [[ "$busy" != 1 ]] && ! pgrep -P "$pane_pid" >/dev/null || fail 'window busy'
     "${inner_tmux[@]}" kill-window -t "$target"
     write_ack ok "closed $target"; exit 0
@@ -70,7 +70,7 @@ else
     if "${inner_tmux[@]}" list-windows -t "$session" -F '#{window_name}' | grep -Fxq "$window"; then
         pane_pid="$("${inner_tmux[@]}" display-message -p -t "$target" '#{pane_pid}')"
         pane_command="$("${inner_tmux[@]}" display-message -p -t "$target" '#{pane_current_command}')"
-        busy="$("${inner_tmux[@]}" show-options -wqv -t "$target" @hpc_gpu_busy)"
+        busy="$("${inner_tmux[@]}" show-options -wqv -t "$target" @hpc_task_busy)"
         [[ "$busy" != 1 && "$pane_command" == bash ]] && ! pgrep -P "$pane_pid" >/dev/null || fail 'window busy'
     else
         "${inner_tmux[@]}" new-window -d -t "$session:" -n "$window" -c "$workspace" /bin/bash --noprofile --norc
@@ -94,8 +94,7 @@ finish_task() {
         printf '%s\t%s\n' "$rc" "$(date -Is)" > "$state_dir/completions/$request_id.done.tmp"
     fi
     mv -f "$state_dir/completions/$request_id.done.tmp" "$state_dir/completions/$request_id.done"
-    tmux -L "$socket" set-option -w -t "$target" @hpc_gpu_busy 0 2>/dev/null || true
-    tmux -L "$socket" set-option -w -t "$target" @psc_gpu_busy 0 2>/dev/null || true
+    tmux -L "$socket" set-option -w -t "$target" @hpc_task_busy 0 2>/dev/null || true
     exit "$rc"
 }
 trap finish_task EXIT
@@ -111,8 +110,7 @@ exit "$rc"
 WORKER
     } > "$command_path"
     chmod 700 "$command_path"
-    "${inner_tmux[@]}" set-option -w -t "$target" @hpc_gpu_busy 1
-    "${inner_tmux[@]}" set-option -w -t "$target" @psc_gpu_busy 1
+    "${inner_tmux[@]}" set-option -w -t "$target" @hpc_task_busy 1
     printf -v dispatch 'bash %q' "$command_path"
     "${inner_tmux[@]}" send-keys -t "$target" -l "$dispatch" || fail 'dispatch uncertain; inspect request before retry'
     "${inner_tmux[@]}" send-keys -t "$target" Enter || fail 'dispatch uncertain; inspect request before retry'

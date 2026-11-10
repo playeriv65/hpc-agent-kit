@@ -241,7 +241,7 @@ class TaskTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         # Unique socket for the test-owned server, but matching production naming.
         self.job = str(900000000 + random.randrange(100000000))
-        self.socket = "gpu-" + self.job
+        self.socket = "alloc-" + self.job
         subprocess.check_call(["tmux", "-L", self.socket, "new-session", "-d", "-s", "work", "-n", "setup",
                                "bash", "--noprofile", "--norc"])
         subprocess.check_call(["tmux", "-L", self.socket, "new-session", "-d", "-s", "zovllm", "-n", "zovllm-setup",
@@ -252,8 +252,8 @@ class TaskTests(unittest.TestCase):
     def run_task(self, site, request, command, window="test", wait=True):
         folder = "remote" if site == "msi" else "psc-remote-install"
         env = dict(os.environ, SLURM_JOB_ID=self.job, MSI_WORKSPACE=str(self.base), LOCAL=str(self.base))
-        env[site.upper() + "_GPU_STATE_DIR"] = str(self.base / site)
-        argv = ["bash", str(ROOT / folder / (site + "-gpu-inner-run")), "--job", self.job,
+        env[site.upper() + "_ALLOCATE_STATE_DIR"] = str(self.base / site)
+        argv = ["bash", str(ROOT / folder / (site + "-allocate-inner-run")), "--job", self.job,
                 "--window", window, "--request", request, "--payload", base64.b64encode(command.encode()).decode()]
         if wait:
             argv.append("--wait")
@@ -285,7 +285,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         state = self.base / "msi"
         query = subprocess.check_output(["python3", str(ROOT / "remote/msi-agent-state"), "task", "literal"],
-                                        env=dict(os.environ, MSI_GPU_STATE_DIR=str(state)), universal_newlines=True)
+                                        env=dict(os.environ, MSI_ALLOCATE_STATE_DIR=str(state)), universal_newlines=True)
         record = json.loads(query)
         self.assertEqual(record["phase"], "completed")
         self.assertEqual(record["exit_code"], 0)
@@ -299,7 +299,7 @@ class TaskTests(unittest.TestCase):
     def test_partial_boot_preserves_existing_session(self):
         state = self.base / "partial"
         state.mkdir()
-        script = 'state_dir="$1"; job_id="$2"; host_name=node; session=work; route_file="$1/missing"; inner_tmux=(tmux -L "gpu-$2"); source "$3"; echo BAD'
+        script = 'state_dir="$1"; job_id="$2"; host_name=node; session=work; route_file="$1/missing"; inner_tmux=(tmux -L "alloc-$2"); source "$3"; echo BAD'
         result = subprocess.run(["bash", "-c", script, "test", str(state), self.job, str(ROOT / "common/boot-guard.sh")],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         self.assertEqual(result.returncode, 3, result.stdout)
@@ -315,8 +315,8 @@ class TaskTests(unittest.TestCase):
         state = self.base / "boot"
         state.mkdir()
         route = state / (self.job + ".route")
-        route.write_text(self.job + "\tnode\tgpu-" + self.job + "\twork\n")
-        script = 'state_dir="$1"; job_id="$2"; host_name=node; session=work; route_file="$1/$2.route"; inner_tmux=(tmux -L "gpu-$2"); source "$3"; echo BAD'
+        route.write_text(self.job + "\tnode\talloc-" + self.job + "\twork\n")
+        script = 'state_dir="$1"; job_id="$2"; host_name=node; session=work; route_file="$1/$2.route"; inner_tmux=(tmux -L "alloc-$2"); source "$3"; echo BAD'
         result = subprocess.run(["bash", "-c", script, "test", str(state), self.job, str(ROOT / "common/boot-guard.sh")],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         self.assertEqual(result.returncode, 0, result.stdout)

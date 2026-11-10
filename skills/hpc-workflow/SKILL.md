@@ -1,10 +1,10 @@
 ---
 name: hpc-workflow
-description: Set up, adapt, operate or recover an agent-operated Slurm GPU workspace using bundled scripts, nested tmux, durable allocation requests, job-local storage and verified automatic backups. Use when asked to establish an HPC workflow or operate an existing installation.
+description: Set up, adapt, operate or recover an agent-operated Slurm GPU or CPU workspace using bundled scripts, nested tmux, durable allocation requests, job-local storage and verified automatic backups. Use when asked to establish an HPC workflow or operate an existing installation.
 license: MIT OR MIT-0
 metadata:
   author: playeriv65
-  version: "0.4.1"
+  version: "0.5.0"
   repository: https://github.com/playeriv65/hpc-agent-kit
 ---
 
@@ -22,7 +22,7 @@ The deliverable is a working connection and operating contract for the user's
 actual cluster. Keep private profiles, generated bundles and logs outside this
 installed directory. Record the package/core versions and installed hashes in
 the site's private notes. Reuse healthy existing installations for ordinary
-operation; installing this skill does not authenticate to an HPC or request GPUs.
+operation; installing this skill does not authenticate to an HPC or request allocations.
 
 ## Establish or adapt a site
 
@@ -36,7 +36,9 @@ facts stay unknown; idle hardware does not establish project access.
 
 Create a private profile using the observed facts and the examples under
 `assets/`. Select `direct-ssh` when login-to-compute SSH is proven, or
-`psc-bridge` for PSC's allocation-terminal bridge. The profile renderer rejects
+`psc-bridge` for PSC's allocation-terminal bridge. Record GPU types under
+`allocation.gpus` and the CPU-only partition under `allocation.cpu`; omit `cpu`
+when the site offers no permitted CPU partition. The profile renderer rejects
 unfilled values, unverified local/persistent storage, non-isolated local paths
 and QoS outside the project/partition intersection. These checks validate the
 provided facts; they do not discover or independently prove those facts.
@@ -65,18 +67,22 @@ is required: the agent probes, writes configuration, deploys and verifies.
 
 ## Operate and recover
 
-The login tmux owns one `gpu-request` allocation pane. Each granted job owns
-`gpu-JOB_ID` compute tmux with setup, autosave and named task windows. A transport
+The login tmux owns one `allocate` pane. Each granted job owns `alloc-JOB_ID`
+compute tmux with setup, autosave and named task windows. A transport
 disconnect does not establish that Slurm released the allocation.
 
 Persist an allocation request ID before submitting:
-`SITE-gpu --request ID GPU_TYPE COUNT WALLTIME`. Reuse exactly that ID and
-configuration after disconnects; `SITE-gpu allocation ID` reconciles the durable
+`SITE-allocate gpu GPU_TYPE COUNT WALLTIME --request ID` or
+`SITE-allocate cpu CORES WALLTIME --mem SIZE --request ID`. Both are one task on
+one node; `--tmp`, `--begin`, `--partition` and `--constraint` are shared options,
+and partitions, limits and defaults come from `allocate.env`. CPU allocations
+skip GPU/CUDA setup. Reuse exactly that ID and configuration after disconnects;
+`SITE-allocate allocation ID` reconciles the durable
 record with Slurm. Reservation or submission uncertainty never authorizes another
 ID. Inspect its log, named pane and scheduler evidence; preserve ambiguous records.
 READY is historical bootstrap evidence, not a current health guarantee.
 
-Use `SITE-gpu run --job JOB_ID --request TASK_ID --wait WINDOW -- COMMAND ...`
+Use `SITE-allocate run --job JOB_ID --request TASK_ID --wait WINDOW -- COMMAND ...`
 for experiments after bootstrap. A repeated task ID must retain the same job,
 window and literal command. Do not create extra `srun` steps for ordinary work.
 Use the repository's launcher to recreate environments and apply its toolchain.
@@ -99,6 +105,10 @@ commit through an atomic pointer; corrupt latest generations fall back to verifi
 predecessors. Abrupt node loss can recover only already committed data.
 Store checkpoints/results explicitly on persistent storage; snapshots exclude
 `.venv` and large model caches. Never classify an incomplete checkpoint as resumable.
+
+End a finished allocation with `SITE-allocate release --job JOB_ID` after saving
+the workspace; it cancels only jobs of this user that carry this installation's
+request comment.
 
 Normal monitoring reads status and logs. Allocation retries, authentication and
 destructive recovery are separate decisions: do not send repeated MFA challenges,

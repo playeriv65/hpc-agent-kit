@@ -10,7 +10,7 @@ Desktop agent
   -> SSH to an always-on host on the permitted network
        -> tmux msi-transport:ssh
             -> foreground OpenSSH master to one MSI login node
-                 -> login tmux: control + GPU allocation holder
+                 -> login tmux: control + allocate window (allocation holder)
                       -> allocated node: job-specific compute tmux
                            -> setup, autosave, named experiment windows
 ```
@@ -175,7 +175,7 @@ For an existing exec/push CLI, use
 [site probing](../skills/hpc-workflow/references/site-probing.md).
 
 The source Windows workflow provides `msi login`, `msi exec`, `msi status`,
-`msi doctor` and GPU/task commands. Those private native entry shims are not
+`msi doctor` and allocation/task commands. Those private native entry shims are not
 included in this generic release. An agent creates the user's entry wrapper
 around their verified route and the rendered helpers; copying the name `msi`
 does not establish a connection. Public profile deployment needs the stdin

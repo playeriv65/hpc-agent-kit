@@ -36,20 +36,30 @@ def target_for(home, site, name):
     if name.startswith('bin/') and re.fullmatch(r'[A-Za-z0-9._-]+', name[4:]):
         return home / '.local/bin' / name[4:]
     if name.startswith('config/') and re.fullmatch(r'[A-Za-z0-9._-]+', name[7:]):
-        return home / ('.config/' + site + '-gpu') / name[7:]
+        return home / ('.config/' + site + '-allocate') / name[7:]
     if name == 'profile.json':
-        return home / ('.config/' + site + '-gpu/profile.json')
+        return home / ('.config/' + site + '-allocate/profile.json')
     raise ValueError('Unsupported release member: ' + name)
 
 
-def quiescent(home, site):
-    queue = subprocess.check_output(['squeue', '-h', '-u', os.environ['USER'], '-o', '%i|%T'],
-                                    universal_newlines=True, timeout=30).strip()
-    if queue: raise RuntimeError('Live jobs exist; deployment refused: ' + queue)
-    for path in (home / ('.local/state/' + site + '-gpu/allocations')).glob('*.json'):
+def retired_path(home, site, name):
+    # A release may retire helpers, configuration or state left by an earlier
+    # layout. Retired paths move into the backup and return on rollback.
+    parts = Path(name).parts
+    allowed = (len(parts) == 3 and parts[:2] in (('.local', 'bin'), ('.local', 'state'))) or (
+        len(parts) >= 2 and parts[0] == '.config')
+    if Path(name).is_absolute() or '..' in parts or not allowed:
+        raise ValueError('Unsupported retired path: ' + name)
+    if parts[:2] == ('.local', 'state') and parts[2] in (site + '-allocate', 'hpc-core-backups'):
+        raise ValueError('Cannot retire current state: ' + name)
+    return home / name
+
+
+def check_allocations(home, site, state):
+    for path in (state / 'allocations').glob('*.json'):
         record = json.loads(path.read_text())
         if path.name == 'hpc-deployment-guard.json' and record.get('deployment_guard') and record.get('cluster') == site:
-            journal = home / ('.local/state/' + site + '-gpu/deployment.json')
+            journal = home / ('.local/state/' + site + '-allocate/deployment.json')
             if journal.exists() and record.get('backup') == json.loads(journal.read_text()).get('backup'):
                 continue
         if record.get('phase') == 'terminal': continue
@@ -61,6 +71,21 @@ def quiescent(home, site):
         if terminal not in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL',
                             'OUT_OF_MEMORY', 'PREEMPTED', 'BOOT_FAIL', 'DEADLINE', 'REVOKED'):
             raise RuntimeError('Allocation termination is unconfirmed: ' + str(path))
+
+
+def quiescent(home, site, retire=()):
+    queue = subprocess.check_output(['squeue', '-h', '-u', os.environ['USER'], '-o', '%i|%T'],
+                                    universal_newlines=True, timeout=30).strip()
+    if queue: raise RuntimeError('Live jobs exist; deployment refused: ' + queue)
+    check_allocations(home, site, home / ('.local/state/' + site + '-allocate'))
+    for name in retire:
+        path = retired_path(home, site, name)
+        if not (path / 'allocations').is_dir(): continue
+        # A retired state directory must hold no live reservation or deployment.
+        check_allocations(home, site, path)
+        journal = path / 'deployment.json'
+        if journal.exists() and json.loads(journal.read_text()).get('phase') in ('installing', 'rolling_back', 'rollback_failed'):
+            raise RuntimeError('Incomplete deployment in retired state: ' + str(journal))
 
 
 def restore(home, site, backup, journal):
@@ -76,12 +101,18 @@ def restore(home, site, backup, journal):
         target = target_for(home, site, name)
         if entry['exists']: atomic(target, (backup / name).read_bytes(), entry['mode'])
         elif target.exists() or target.is_symlink(): target.unlink()
+    for name, existed in index.get('retired', {}).items():
+        saved = backup / 'retired' / name
+        if existed and (saved.exists() or saved.is_symlink()):
+            target = retired_path(home, site, name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(str(saved), str(target))
     write_json(journal, dict(phase='rolled_back', backup=str(backup)))
     remove_guard(home, site)
 
 
 def remove_guard(home, site):
-    guard = home / ('.local/state/' + site + '-gpu/allocations/hpc-deployment-guard.json')
+    guard = home / ('.local/state/' + site + '-allocate/allocations/hpc-deployment-guard.json')
     if guard.exists():
         record = json.loads(guard.read_text())
         if not record.get('deployment_guard') or record.get('cluster') != site:
@@ -92,15 +123,17 @@ def remove_guard(home, site):
 def install(payload):
     home = Path.home(); site = payload['site']
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,30}', site): raise ValueError('Invalid site')
-    state = home / ('.local/state/' + site + '-gpu')
+    state = home / ('.local/state/' + site + '-allocate')
     allocations = state / 'allocations'; allocations.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = (allocations / 'submit.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    quiescent(home, site)
+    retire = list(payload.get('retire', []))
+    for name in retire: retired_path(home, site, name)
+    quiescent(home, site, retire)
     journal = state / 'deployment.json'
     archive = os.path.expandvars(payload.get('archive', ''))
     if not archive:
-        config = home / ('.config/' + site + '-gpu/gpu.env')
+        config = home / ('.config/' + site + '-allocate/allocate.env')
         variable = site.upper().replace('-', '_') + '_LOCAL_SNAPSHOT_ARCHIVE'
         command = 'set -e; [[ ! -f "$1" ]] || source "$1"; printf "%s" "${' + variable + ':-${HPC_ARCHIVE:-}}"'
         archive = subprocess.check_output(['bash', '-c', command, 'probe', str(config)],
@@ -139,6 +172,11 @@ def install(payload):
     backup = home / ('.local/state/hpc-core-backups/' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '-' + site)
     backup.mkdir(parents=True, mode=0o700)
     index = dict(site=site, files={})
+    targets = {target_for(home, site, name) for name in files}
+    for name in retire:
+        path = retired_path(home, site, name)
+        if any(path == target or path in target.parents for target in targets):
+            raise ValueError('Retired path overlaps the release: ' + name)
     for name in files:
         target = target_for(home, site, name)
         if target.is_symlink(): raise RuntimeError('Symlink install target needs explicit inspection: ' + str(target))
@@ -147,6 +185,7 @@ def install(payload):
             data = target.read_bytes(); entry.update(mode=target.stat().st_mode & 0o777, sha256=hashlib.sha256(data).hexdigest())
             atomic(backup / name, data)
         index['files'][name] = entry
+    index['retired'] = {name: os.path.lexists(str(retired_path(home, site, name))) for name in retire}
     write_json(backup / 'index.json', index)
     write_json(journal, dict(phase='installing', backup=str(backup), core_version=payload['manifest']['core_version']))
     # Older allocation helpers already reject another unresolved reservation.
@@ -161,6 +200,11 @@ def install(payload):
     def interrupted(signum, frame): raise RuntimeError('Deployment interrupted by signal ' + str(signum))
     signal.signal(signal.SIGTERM, interrupted); signal.signal(signal.SIGHUP, interrupted)
     try:
+        for name, existed in index['retired'].items():
+            if existed:
+                saved = backup / 'retired' / name
+                saved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.rename(str(retired_path(home, site, name)), str(saved))
         for name, data in files.items():
             atomic(target_for(home, site, name), data, 0o700 if name.startswith('bin/') else 0o600)
             if hashlib.sha256(target_for(home, site, name).read_bytes()).hexdigest() != hashlib.sha256(data).hexdigest():
@@ -174,6 +218,7 @@ def install(payload):
             raise
         raise
     print(json.dumps(dict(site=site, core_version=payload['manifest']['core_version'], verified_files=len(files)-1,
+                         retired=sorted(name for name, existed in index['retired'].items() if existed),
                          backup=str(backup), stage=str(stage), action='committed')))
 
 

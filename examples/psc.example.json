@@ -33,6 +33,13 @@
     "walltime": "00:04:00",
     "default_gpu": "v100",
     "local_scratch": "",
+    "cpu": {
+      "partition": "RM-shared",
+      "qos": "",
+      "cores": 8,
+      "max_cores": 64,
+      "memory": null
+    },
     "gpus": {
       "v100": {
         "gres": "v100-32",

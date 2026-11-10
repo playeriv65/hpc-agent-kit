@@ -16,7 +16,7 @@ different `/tmp` namespace and miss the allocation's tmux socket. Use the existi
 allocation bridge for commands, window inspection and snapshots. For another
 site, prove its compute route within the allocated context before choosing
 `direct-ssh`. Always bind dispatch to the intended job and verify its identity;
-do not select the first visible GPU when several jobs exist.
+do not select the first visible allocation when several jobs exist.
 
 The outer tmux owns allocation; compute tmux owns tasks. Keep setup/autosave
 windows protected. The generated configuration uses `Ctrl-b` outside and
@@ -68,7 +68,7 @@ source copy; preserve it before synchronizing with upstream.
 
 Before a long run, validate its configuration/imports through the same launcher.
 Warm up JIT-dependent benchmarks before timing; keep startup compilation logs
-separate from measured results. Do not submit another GPU to fix an application
+separate from measured results. Do not submit another allocation to fix an application
 startup error while its original allocation remains available.
 
 ## Scratch, caches and storage budgets

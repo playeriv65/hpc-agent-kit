@@ -33,6 +33,13 @@
     "walltime": "00:04:00",
     "default_gpu": "v100",
     "local_scratch": "100G",
+    "cpu": {
+      "partition": "interactive",
+      "qos": "",
+      "cores": 8,
+      "max_cores": 128,
+      "memory": "32G"
+    },
     "gpus": {
       "v100": {
         "gres": "v100",

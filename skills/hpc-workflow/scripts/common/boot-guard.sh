@@ -7,7 +7,7 @@ if "${inner_tmux[@]}" has-session -t "$session" 2>/dev/null; then
     recorded_job="$("${inner_tmux[@]}" show-environment -g SLURM_JOB_ID 2>/dev/null || true)"
     if [[ "${recorded_job#SLURM_JOB_ID=}" == "$job_id" && -s "$route_file" ]] &&
             [[ "$(cut -f1 "$route_file")" == "$job_id" && "$(cut -f2 "$route_file")" == "$host_name" ]]; then
-        printf 'GPU_BOOT_REUSED job=%s host=%s session=%s\n' "$job_id" "$host_name" "$session"
+        printf 'ALLOCATE_BOOT_REUSED job=%s host=%s session=%s\n' "$job_id" "$host_name" "$session"
         exit 0
     fi
     echo 'existing compute session has no matching READY route; preserved for inspection' >&2

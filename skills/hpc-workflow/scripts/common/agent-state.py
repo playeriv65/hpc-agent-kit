@@ -84,7 +84,7 @@ def status(state, doctor=False, verify_backup=False):
                 argv = ["tmux", "-S", fields[2], "display-message", "-p", "-t", fields[3], "#{pane_dead}|#{pane_pid}"]
             else:
                 argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host,
-                        "tmux -L gpu-" + job + " has-session -t work"]
+                        "tmux -L alloc-" + job + " has-session -t work"]
             output, probe_error = capture(argv)
             healthy = not probe_error
             if ADAPTER == "psc" and healthy:
@@ -94,7 +94,7 @@ def status(state, doctor=False, verify_backup=False):
                 result["errors"].append(probe_error)
             if healthy:
                 core_bin = Path(os.environ.get('HPC_CORE_BIN', str(Path.home() / '.local/bin')))
-                argv = [str(core_bin / (SITE + '-gpu')), 'run', '--job', job, '--request', 'health-' + uuid.uuid4().hex,
+                argv = [str(core_bin / (SITE + '-allocate')), 'run', '--job', job, '--request', 'health-' + uuid.uuid4().hex,
                         '--wait', 'hpc-health', '--', str(core_bin / (SITE + '-health')), '--job', job]
                 if verify_backup:
                     argv.append('--verify')
@@ -148,7 +148,7 @@ def main():
     parser.add_argument("request", nargs="?")
     parser.add_argument('--verify-backup', action='store_true')
     args = parser.parse_args()
-    state = Path(os.environ.get(PREFIX + "_GPU_STATE_DIR", str(Path.home() / ".local/state" / (SITE + "-gpu"))))
+    state = Path(os.environ.get(PREFIX + "_ALLOCATE_STATE_DIR", str(Path.home() / ".local/state" / (SITE + "-allocate"))))
     try:
         if args.verify_backup and args.mode != 'doctor':
             raise ValueError('--verify-backup requires doctor')

@@ -26,9 +26,9 @@ def profile(name='test-lab'):
 class ProfileTests(unittest.TestCase):
     def test_snapshot_policy_is_validated_and_reaches_generated_config(self):
         data = profile(); data['snapshot'] = dict(interval=600, end_margin=900, generations_keep=4)
-        config = renderer.render(data)['config/gpu.env']
+        config = renderer.render(data)['config/allocate.env']
         self.assertIn('TEST_LAB_LOCAL_SNAPSHOT_END_MARGIN=900', config)
-        self.assertIn('TEST_LAB_GPU_AUTOSAVE_INTERVAL=600', config)
+        self.assertIn('TEST_LAB_ALLOCATE_AUTOSAVE_INTERVAL=600', config)
         data['snapshot']['generations_keep'] = 1
         with self.assertRaisesRegex(ValueError, 'Invalid snapshot policy'):
             renderer.render(data)
@@ -50,7 +50,7 @@ class ProfileTests(unittest.TestCase):
             header = (ROOT / 'common/sites/psc-boot.sh').read_text().split('if [[ -f "$HOME/.psc-local-env.sh" ]]')[0]
             header = header.replace('/local', str(scratch))
             env = dict(os.environ, LOCAL=str(scratch), USER='fixture', SLURM_JOB_ID='123',
-                       PSC_GPU_CONFIG=str(Path(temporary) / 'absent.env'))
+                       PSC_ALLOCATE_CONFIG=str(Path(temporary) / 'absent.env'))
             expected = scratch / 'fixture/hpc-job-123'
             for initial in (str(scratch), None):
                 if initial is None: env.pop('LOCAL', None)
@@ -59,6 +59,38 @@ class ProfileTests(unittest.TestCase):
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertEqual(result.stdout, str(expected)); self.assertTrue(expected.is_dir())
+
+    def test_psc_boot_publishes_cuda_only_for_gpu_allocations(self):
+        boot = (ROOT / 'common/sites/psc-boot.sh').read_text()
+        start = boot.index('toolchain_config=')
+        section = boot[start:boot.index(': "${SLURM_JOB_ID:?', start)]
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / 'toolchain.env'
+            config.write_text('GCC_MODULE=gcc/10\nCC=gcc\nCXX=g++\nCUDA_HOME=/opt/cuda-test\n')
+            script = ('module() { printf "MODULE %s\\n" "$*"; }\n' + section +
+                      'printf "READY=%s CUDA=%s\\n" "$PSC_TOOLCHAIN_READY" "${CUDA_HOME:-none}"; printf "PATH=%s\\n" "$PATH"')
+            for kind, cuda in (('gpu', '/opt/cuda-test'), ('cpu', 'none')):
+                env = dict(os.environ, PSC_TOOLCHAIN_CONFIG=str(config), HPC_ALLOCATION_KIND=kind)
+                env.pop('CUDA_HOME', None)
+                output = subprocess.check_output(['bash', '-c', script], env=env, universal_newlines=True)
+                self.assertIn('MODULE load gcc/10', output)
+                self.assertIn('READY=1 CUDA=' + cuda, output)
+                self.assertEqual('/opt/cuda-test/bin' in output, kind == 'gpu')
+
+    def test_cpu_section_renders_allocate_settings(self):
+        data = profile()
+        data['allocation']['cpu'] = dict(partition='batch', qos='gpu', cores=4, max_cores=64, memory='16G', constraint='genoa')
+        data['verified']['partition_qos']['batch'] = ['gpu']
+        config = renderer.render(data)['config/allocate.env']
+        for line in ('TEST_LAB_ALLOCATE_CPU_PARTITION=batch', 'TEST_LAB_ALLOCATE_CPU_CORES=4', 'TEST_LAB_ALLOCATE_CPU_MAX_CORES=64',
+                     'TEST_LAB_ALLOCATE_CPU_MEMORY=16G', 'TEST_LAB_ALLOCATE_CPU_CONSTRAINT=genoa',
+                     "TEST_LAB_ALLOCATE_GPU_MI300_COUNTS='1 2 3 4'", 'TEST_LAB_ALLOCATE_GPU_MI300_GRES=mi300a'):
+            self.assertIn(line, config.splitlines())
+        data['allocation']['cpu']['memory'] = None
+        self.assertIn('TEST_LAB_ALLOCATE_CPU_MEMORY_REQUEST=0', renderer.render(data)['config/allocate.env'])
+        data['allocation']['cpu']['qos'] = 'other'
+        with self.assertRaisesRegex(ValueError, 'both project and partition'):
+            renderer.validate(data)
 
     def test_qos_intersection_and_unknown_compute_access(self):
         data = profile(); data['verified']['project_qos'] = ['low']
@@ -85,7 +117,18 @@ class ProfileTests(unittest.TestCase):
                         compile(body, name, 'exec')
 
     def test_generic_adapter_submits_profile_gres_in_real_tmux(self):
+        self.submit_generic(['gpu', 'mi300', '1', '00:04:00'], ['--gres=gpu:mi300a:1', '--partition=accelerator', '--qos=gpu'])
+
+    def test_generic_adapter_submits_cpu_allocation_in_real_tmux(self):
+        expected = ['--partition=batch', '--nodes=1', '--ntasks=1', '--cpus-per-task=4', '--mem=12G', '--time=00:10:00']
+        args = self.submit_generic(['cpu', '4', '00:10:00', '--mem', '12G'], expected)
+        self.assertEqual(args[:len(expected)], expected)
+        self.assertFalse(any(arg.startswith('--gres') for arg in args))
+
+    def submit_generic(self, request, expected):
         data = profile('lab-' + uuid.uuid4().hex[:10])
+        data['allocation']['cpu'] = dict(partition='batch', qos='gpu', cores=2, max_cores=16, memory='8G')
+        data['verified']['partition_qos']['batch'] = ['gpu']
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for name, body in renderer.render(data).items():
@@ -95,10 +138,10 @@ class ProfileTests(unittest.TestCase):
                 path = fake / name; path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o700)
             prefix = data['name'].upper().replace('-', '_')
             env = dict(os.environ, HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],
-                       **{prefix + '_GPU_CONFIG': str(root / 'config/gpu.env'), prefix + '_GPU_STATE_DIR': str(root / 'state')})
+                       **{prefix + '_ALLOCATE_CONFIG': str(root / 'config/allocate.env'), prefix + '_ALLOCATE_STATE_DIR': str(root / 'state')})
             socket = data['name'] + '-login'
             try:
-                command = ['bash', str(root / 'bin' / (data['name'] + '-gpu')), '--request', 'stable', 'mi300', '1', '00:04:00']
+                command = ['bash', str(root / 'bin' / (data['name'] + '-allocate')), '--request', 'stable'] + request
                 result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 for _ in range(100):
@@ -106,12 +149,15 @@ class ProfileTests(unittest.TestCase):
                     time.sleep(0.05)
                 self.assertTrue(marker.exists(), 'candidate never reached the stub scheduler')
                 args = marker.read_text().splitlines()
-                self.assertIn('--gres=gpu:mi300a:1', args); self.assertIn('--account=testproject', args)
+                for item in expected + ['--account=testproject']:
+                    self.assertIn(item, args)
                 record = json.loads((root / 'state/allocations/stable.json').read_text())
                 self.assertIn('--comment=' + record['comment'], args)
+                self.assertEqual(record['identity']['spec']['kind'], request[0])
                 repeated = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.assertEqual(repeated.returncode, 0, repeated.stdout)
                 self.assertEqual(marker.read_text().splitlines(), args)
+                return args
             finally:
                 subprocess.call(['tmux', '-L', socket, 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -135,13 +181,13 @@ class ProfileTests(unittest.TestCase):
             prefix = data['name'].upper().replace('-', '_'); socket = data['name'] + '-login'
             # Model the installed config location inside a private fixture HOME.
             # tmux 3.2 opens a startup error mode when an explicit -f is absent.
-            login_config = root / '.config' / (data['name'] + '-gpu') / 'tmux.login.conf'
+            login_config = root / '.config' / (data['name'] + '-allocate') / 'tmux.login.conf'
             login_config.parent.mkdir(parents=True)
             login_config.write_text((root / 'config/tmux.login.conf').read_text())
             env = dict(os.environ, HOME=str(root), HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],
-                       **{prefix + '_GPU_CONFIG': str(root / 'config/gpu.env'), prefix + '_GPU_STATE_DIR': str(root / 'state')})
+                       **{prefix + '_ALLOCATE_CONFIG': str(root / 'config/allocate.env'), prefix + '_ALLOCATE_STATE_DIR': str(root / 'state')})
             try:
-                result = subprocess.run(['bash', str(root / 'bin' / (data['name'] + '-gpu')), '--request', 'stable',
+                result = subprocess.run(['bash', str(root / 'bin' / (data['name'] + '-allocate')), '--request', 'stable', 'gpu',
                                          'v100', '1', '00:04:00'], env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.assertEqual(result.returncode, 0, result.stdout)

@@ -13,6 +13,7 @@ responses in the profile, command arguments or repository.
 | Helper runtime | Bash 4+, Python 3.6+, GNU tar with listed incrementals, zstd, flock, GNU coreutils/date, awk, find, sort, pgrep and tmux | Syntax checks do not establish that compute nodes have these tools or compatible flags. |
 | Account and QoS | `sacctmgr show assoc` and `scontrol show partition` | Allowed QoS is the intersection, including a verified default if no QoS is specified. |
 | GPU eligibility/capacity | GRES, CfgTRES/AllocTRES and partition policy | Mixed CPU state does not prove free GPUs; idle GPUs may be reserved or inaccessible. |
+| CPU partitions and memory | `scontrol show partition` (MaxTime, MaxNodes, DefMemPerCPU), `sinfo -o '%P %C %e %f'` | Idle cores can come with little free memory; request `--mem` explicitly, or record that a partition assigns memory per core and refuses `--mem`. |
 | Compute access | A permitted allocated-node identity probe | Direct SSH and PSC terminal bridge are different backends; never guess access. |
 | Local storage | Site policy plus allocated-node `findmnt`, writability and actual environment | It must be disk-backed and scoped to the job; `/dev/shm` is memory. |
 | Persistent outputs/archive | Site storage policy, quota and mount/path checks | Neither local scratch nor purgeable global scratch is a checkpoint archive. |

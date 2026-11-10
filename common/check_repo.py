@@ -1,4 +1,4 @@
-"""Verify the public checkout's inventory, version, contracts and remote syntax."""
+"""Verify the public checkout's inventory, version and remote syntax."""
 import ast
 import argparse
 import hashlib
@@ -12,8 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def check(root=ROOT, refresh=False):
-    if (root / 'AGENTS.md').read_bytes() != (root / 'CLAUDE.md').read_bytes():
-        raise ValueError('AGENTS.md and CLAUDE.md differ; update both copies')
     metadata = tomllib.loads((root / 'pyproject.toml').read_text())
     manifest = json.loads((root / 'export-manifest.json').read_text())
     if not refresh and manifest['core_version'] != metadata['project']['version']:
@@ -33,7 +31,7 @@ def check(root=ROOT, refresh=False):
         manifest['core_version'] = metadata['project']['version']
         manifest['files'] = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in manifest['files']}
         (root / 'export-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8', newline='\n')
-    return dict(version=manifest['core_version'], verified_files=len(manifest['files']), contracts='identical')
+    return dict(version=manifest['core_version'], verified_files=len(manifest['files']))
 
 
 if __name__ == '__main__':

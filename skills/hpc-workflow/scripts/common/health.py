@@ -75,7 +75,7 @@ def main():
         if ADAPTER == 'psc':
             default = Path.home() / 'project/local-workspaces' / ('local-' + os.environ['USER'] + '.tar.zst')
         archive = os.environ.get(PREFIX + '_LOCAL_SNAPSHOT_ARCHIVE', str(default))
-        result = observe(archive, args.job, int(os.environ.get(PREFIX + '_GPU_AUTOSAVE_INTERVAL', '300')))
+        result = observe(archive, args.job, int(os.environ.get(PREFIX + '_ALLOCATE_AUTOSAVE_INTERVAL', '300')))
         base = os.environ.get(PREFIX + '_LOCAL_BASE') if ADAPTER == 'msi' else os.environ.get('LOCAL')
         result.update(cluster=SITE, job_id=args.job, host=socket.gethostname(), observed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                       compute_storage=dict(path=base, writable=bool(base and os.path.isdir(base) and os.access(base, os.W_OK))))

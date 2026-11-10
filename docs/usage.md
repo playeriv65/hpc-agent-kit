@@ -14,7 +14,7 @@ notes outside public files.
 | Component | Purpose |
 | --- | --- |
 | `common/profile.py` | Validate supplied site facts and render a standalone bundle. |
-| `common/allocation.py` | Persist request identity before tmux dispatch; recover by Slurm owner/comment. |
+| `common/allocation.py` | Build `allocate gpu|cpu` requests from site configuration; persist request identity before tmux dispatch; recover by Slurm owner/comment. |
 | `common/task-runner.sh` | Deduplicate named experiment commands and retain output/exit status. |
 | `common/local-snapshot.sh` | Restore, verify, autosave, compact and retain immutable generations. |
 | `common/agent-state.py`, `common/health.py` | Separate queue observations, current process health and archive integrity checks. |
@@ -55,17 +55,37 @@ site values. Inspect existing jobs first. Keep the same allocation/task request
 ID and parameters when recovering from a transport failure.
 
 ```sh
-SITE-gpu --request ID TYPE COUNT WALLTIME
-SITE-gpu allocation ID
-SITE-gpu run --job JOB --request TASK --wait WINDOW -- COMMAND ...
+SITE-allocate gpu TYPE COUNT WALLTIME --request ID
+SITE-allocate cpu CORES WALLTIME --mem SIZE --request ID
+SITE-allocate allocation ID
+SITE-allocate run --job JOB --request TASK --wait WINDOW -- COMMAND ...
+SITE-allocate release --job JOB
 SITE-agent-state status
 SITE-agent-state doctor
 SITE-agent-state doctor --verify-backup
 ```
 
-Login tmux holds the allocation. Each granted job owns compute tmux with
-`setup`, `autosave` and named task windows. After bootstrap, route ordinary work
-through `SITE-gpu run`, without additional `srun` steps. Use the repository's
+Both kinds accept `--request ID`, `--begin TIME`, `--tmp SIZE` (job-local disk),
+`--mem SIZE`, `--partition NAME` and `--constraint FEATURES`. Every request is
+one task on one node. A GPU request uses the partition, GRES, QoS and allowed
+counts configured for its type; a CPU request uses `--cpus-per-task=CORES` on
+the configured CPU partition. `--partition` accepts only partitions listed in
+the configuration. Where a partition assigns memory per core or GPU, the
+configuration refuses `--mem`. The profile's `allocation.cpu` section enables
+CPU allocations:
+
+```json
+"cpu": {"partition": "small", "qos": "", "cores": 8, "max_cores": 128, "memory": "32G"}
+```
+
+`memory: null` marks a partition that assigns memory per core.
+
+Login tmux holds the allocation in its `allocate` window. Each granted job owns
+compute tmux `alloc-JOB_ID` with `setup`, `autosave` and named task windows.
+After bootstrap, route ordinary work through `SITE-allocate run`, without
+additional `srun` steps. `release` checks that the job belongs to the user and
+carries this installation's request comment before `scancel`; save the
+workspace first when it must be preserved. Use the repository's
 launcher to configure its framework and recreate `.venv` with `uv sync --locked`.
 
 ## Backups and health
@@ -110,8 +130,8 @@ practical decisions behind these boundaries and the required compute probes.
 
 ## Maintaining the repository
 
-Maintain both README languages together and keep `AGENTS.md` / `CLAUDE.md`
-byte-identical. Shared templates under `common/` are authoritative. For
+Maintain both README languages together; the agent contract lives only in
+`AGENTS.md`. Shared templates under `common/` are authoritative. For
 intentional edits, refresh existing allowlisted hashes before validation:
 
 ```sh

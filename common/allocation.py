@@ -81,7 +81,7 @@ def reconcile(record, jobs):
 
 
 def directory():
-    return Path(os.environ.get(PREFIX + '_GPU_STATE_DIR', str(Path.home() / '.local/state' / (SITE + '-gpu')))) / 'allocations'
+    return Path(os.environ.get(PREFIX + '_ALLOCATE_STATE_DIR', str(Path.home() / '.local/state' / (SITE + '-allocate')))) / 'allocations'
 
 
 def request_path(root, request):
@@ -90,10 +90,146 @@ def request_path(root, request):
     return root / (request + '.json')
 
 
+USAGE = ('allocate gpu [TYPE [COUNT [WALLTIME]]] | allocate cpu [CORES [WALLTIME]]; options: '
+         '--request ID --begin TIME --tmp SIZE --mem SIZE --partition NAME --constraint FEATURES')
+WALLTIME = r'^[0-9]+:[0-5][0-9]:[0-5][0-9]$'
+SIZE = r'^[1-9][0-9]*[KMGT]?$'
+NAME = r'^[A-Za-z0-9][A-Za-z0-9_,-]*$'
+
+
+def setting(scope, name, default=''):
+    """Read PREFIX_ALLOCATE_[SCOPE_]NAME from the sourced site configuration."""
+    key = PREFIX + '_ALLOCATE_' + (scope + '_' if scope else '') + name
+    return os.environ.get(key, default).strip()
+
+
+def plan(argv):
+    """Validate one allocate request against site configuration; return salloc arguments."""
+    flags = {'--request': 'request', '--begin': 'begin', '--tmp': 'tmp', '--mem': 'mem',
+             '--partition': 'partition', '--constraint': 'constraint'}
+    options = dict(request='', begin='', tmp=None, mem=None, partition=None, constraint=None)
+    positional = []
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item in flags:
+            if index + 1 >= len(argv):
+                raise ValueError(item + ' requires a value')
+            options[flags[item]] = argv[index + 1]
+            index += 2
+        elif item.startswith('-'):
+            raise ValueError('unknown option ' + item + '; usage: ' + USAGE)
+        else:
+            positional.append(item)
+            index += 1
+    if not positional or positional[0] not in ('gpu', 'cpu'):
+        raise ValueError('usage: ' + USAGE)
+    kind = positional.pop(0)
+    family = kind.upper()
+    env = dict(HPC_ALLOCATION_KIND=kind)
+    fields = dict(kind=kind)
+    if kind == 'gpu':
+        if len(positional) > 3:
+            raise ValueError('too many arguments; usage: ' + USAGE)
+        types = setting('GPU', 'TYPES').split()
+        gpu = (positional[0] if positional else setting('GPU', 'DEFAULT_TYPE')).lower()
+        if gpu not in types:
+            raise ValueError('GPU type must be one of: ' + ', '.join(types))
+        scope = 'GPU_' + re.sub(r'[^A-Z0-9]', '_', gpu.upper())
+        count = positional[1] if len(positional) > 1 else setting('GPU', 'DEFAULT_COUNT')
+        counts = setting(scope, 'COUNTS').split()
+        if count not in counts:
+            raise ValueError('GPU count for ' + gpu + ' must be one of: ' + ', '.join(counts))
+        walltime = positional[2] if len(positional) > 2 else setting('GPU', 'WALLTIME')
+        partition, qos = setting(scope, 'PARTITION'), setting(scope, 'QOS')
+        gres = setting(scope, 'GRES') or gpu
+        cpus = setting('GPU', 'CPUS')
+        resources = (['--cpus-per-task=' + cpus] if cpus else []) + ['--gres=gpu:' + gres + ':' + count]
+        fields.update(gpu=gres, count=count, cpus=cpus)
+        pattern = setting(scope, 'NAME_PATTERN')
+        if pattern:
+            env['HPC_EXPECTED_GPU_NAME_PATTERN'] = pattern
+    else:
+        if len(positional) > 2:
+            raise ValueError('too many arguments; usage: ' + USAGE)
+        cores = positional[0] if positional else setting('CPU', 'CORES')
+        walltime = positional[1] if len(positional) > 1 else setting('CPU', 'WALLTIME')
+        scope = 'CPU'
+        partition, qos = setting('CPU', 'PARTITION'), setting('CPU', 'QOS')
+        resources = ['--cpus-per-task=' + cores]
+        fields.update(cores=cores, cpus=cores)
+    if options['partition'] is not None:
+        # Only partitions listed for this kind in the site configuration are accepted.
+        allowed = setting(scope, 'PARTITIONS').split() or [partition]
+        if options['partition'] not in allowed:
+            raise ValueError('--partition for ' + kind + ' must be one of: ' + ', '.join(allowed))
+        partition = options['partition']
+    constraint = options['constraint'] if options['constraint'] is not None else setting(scope, 'CONSTRAINT')
+    if constraint and not re.match(r'^[A-Za-z0-9_&|,()\[\]*-]+$', constraint):
+        raise ValueError('--constraint must use Slurm feature syntax')
+    if not re.match(NAME, partition):
+        raise ValueError('No valid ' + kind + ' partition is configured')
+    if kind == 'cpu':
+        # A partition may cap cores below the site-wide maximum (shared nodes).
+        limit = setting('CPU', 'MAX_CORES_' + re.sub(r'[^A-Z0-9]', '_', partition.upper())) or setting('CPU', 'MAX_CORES')
+        if not re.match(r'^[1-9][0-9]*$', cores) or not limit.isdigit() or int(cores) > int(limit):
+            raise ValueError('CPU cores on ' + partition + ' must be between 1 and ' + (limit or 'the configured maximum'))
+    if qos and not re.match(NAME, qos):
+        raise ValueError('Invalid configured QoS: ' + qos)
+    if not re.match(WALLTIME, walltime):
+        raise ValueError('WALLTIME must use HH:MM:SS')
+    memory = setting(family, 'MEMORY')
+    if setting(family, 'MEMORY_REQUEST', '1') == '0':
+        # Some partitions derive memory from cores or GPUs and reject --mem.
+        if options['mem'] is not None:
+            raise ValueError(partition + ' assigns memory per core or GPU; request more of those instead of --mem')
+        memory = ''
+    elif options['mem'] is not None:
+        memory = options['mem']
+    tmp = options['tmp'] if options['tmp'] is not None else setting(family, 'TMP')
+    for label, value in (('--mem', memory), ('--tmp', tmp)):
+        if value and not re.match(SIZE, value):
+            raise ValueError(label + ' must be a size such as 8G')
+    begin = options['begin']
+    if begin and not re.match(r'^[A-Za-z0-9:/ .+-]+$', begin):
+        raise ValueError('--begin must use Slurm time syntax')
+    request = options['request'] or '%d-%d' % (int(datetime.datetime.now().timestamp() * 1e9), os.getppid())
+    if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', request):
+        raise ValueError('Invalid allocation request ID')
+    account = setting('', 'ACCOUNT')
+    salloc = ['--partition=' + partition, '--nodes=1', '--ntasks=1'] + resources
+    salloc += ['--mem=' + memory] if memory else []
+    salloc += ['--time=' + walltime]
+    salloc += ['--tmp=' + tmp] if tmp else []
+    salloc += ['--constraint=' + constraint] if constraint else []
+    salloc += ['--qos=' + qos] if qos else []
+    salloc += ['--account=' + account] if account else []
+    salloc += ['--begin=' + begin] if begin else []
+    fields.update(account=account, partition=partition, qos=qos, time=walltime, begin=begin,
+                  memory=memory, scratch=tmp, constraint=constraint)
+    return dict(request=request, kind=kind, salloc=salloc, fields=fields, env=env)
+
+
+def shell_plan(result):
+    """Render a plan as Bash assignments for the site allocator to eval."""
+    def array(name, items):
+        return name + '=(' + ' '.join(shlex.quote(item) for item in items) + ')'
+    fields = []
+    for key in sorted(result['fields']):
+        fields += ['--field', key + '=' + result['fields'][key]]
+    return '\n'.join([
+        'allocation_request=' + shlex.quote(result['request']),
+        'allocation_kind=' + shlex.quote(result['kind']),
+        array('salloc_args', result['salloc']),
+        array('allocation_fields', fields),
+        array('allocation_env', [key + '=' + value for key, value in sorted(result['env'].items())]),
+    ]) + '\n'
+
+
 def submit(root, args):
     journal = root.parent / 'deployment.json'
     if journal.exists() and json.loads(journal.read_text()).get('phase') in ('installing', 'rolling_back', 'rollback_failed'):
-        raise RuntimeError('Incomplete deployment; recover the saved release before requesting a GPU')
+        raise RuntimeError('Incomplete deployment; recover the saved release before allocating')
     path = request_path(root, args.request)
     spec = dict(field.split('=', 1) for field in args.field)
     identity = dict(spec=spec, argv=args.command, socket=args.socket, target=args.target)
@@ -131,7 +267,7 @@ def submit(root, args):
                   log_path=str(root / (args.request + '.log')))
     atomic(path, record)  # After this point, uncertainty never causes resubmission.
     env = ['/usr/bin/env', 'HPC_ALLOCATION_REQUEST_ID=' + args.request,
-           PREFIX + '_GPU_STATE_DIR=' + str(root.parent),
+           PREFIX + '_ALLOCATE_STATE_DIR=' + str(root.parent),
            'HPC_CORE_JOB_NAME=' + name, 'HPC_ALLOCATION_COMMENT=' + comment]
     holder = str(Path(__file__).resolve())
     shell = 'exec ' + ' '.join(shlex.quote(x) for x in env + [holder, 'hold', args.request, '--'] + args.command)
@@ -178,6 +314,13 @@ def hold(root, args):
 
 
 def main():
+    if sys.argv[1:2] == ['plan']:
+        try:
+            sys.stdout.write(shell_plan(plan(sys.argv[2:])))
+            return 0
+        except ValueError as error:
+            print(SITE + '-allocate: ' + str(error), file=sys.stderr)
+            return 2
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['submit', 'hold', 'get', 'bind'])
     parser.add_argument('request')
