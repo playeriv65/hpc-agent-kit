@@ -125,6 +125,34 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(args[:len(expected)], expected)
         self.assertFalse(any(arg.startswith('--gres') for arg in args))
 
+    def test_generic_adapter_release_finishes_pending_request(self):
+        data = profile('lab-' + uuid.uuid4().hex[:10])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, body in renderer.render(data).items():
+                path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(body); path.chmod(0o700)
+            allocations = root / 'state/allocations'; allocations.mkdir(parents=True)
+            comment = 'hpc-core:' + data['name'] + ':pending'
+            record = dict(schema_version=1, cluster=data['name'], request_id='pending', identity={}, job_name='hpc-pending',
+                          comment=comment, phase='holding', created_at='2026-01-01T00:00:00+00:00', job_id=None)
+            (allocations / 'pending.json').write_text(json.dumps(record))
+            fake = root / 'fake'; fake.mkdir(); cancelled = root / 'cancelled'
+            stubs = {'squeue': '[[ -e "%s" ]] || echo "77|PENDING|hpc-pending|"' % cancelled,
+                     'scontrol': 'echo "JobId=77 JobName=hpc-pending UserId=$USER(42) JobState=PENDING Comment=%s"' % comment,
+                     'scancel': '[[ "$*" == 77 ]] && touch "%s"' % cancelled,
+                     'sacct': 'echo "77|CANCELLED by 42|0:0"'}
+            for name, body in stubs.items():
+                path = fake / name; path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o700)
+            prefix = data['name'].upper().replace('-', '_')
+            env = dict(os.environ, HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],
+                       **{prefix + '_ALLOCATE_CONFIG': str(root / 'config/allocate.env'), prefix + '_ALLOCATE_STATE_DIR': str(root / 'state')})
+            result = subprocess.run(['bash', str(root / 'bin' / (data['name'] + '-allocate')), 'release', '--job', '77'], env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(cancelled.exists())
+            final = json.loads((allocations / 'pending.json').read_text())
+            self.assertEqual((final['job_id'], final['phase'], final['slurm_state']), ('77', 'terminal', 'CANCELLED by 42'))
+
     def submit_generic(self, request, expected):
         data = profile('lab-' + uuid.uuid4().hex[:10])
         data['allocation']['cpu'] = dict(partition='batch', qos='gpu', cores=2, max_cores=16, memory='8G')
@@ -134,7 +162,7 @@ class ProfileTests(unittest.TestCase):
             for name, body in renderer.render(data).items():
                 path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(body); path.chmod(0o700)
             fake = root / 'fake'; fake.mkdir(); marker = root / 'submitted'
-            for name, body in {'squeue': 'exit 0', 'pgrep': 'exit 1', 'salloc': 'printf "%s\\n" "$@" > "' + str(marker) + '"'}.items():
+            for name, body in {'squeue': 'exit 0', 'sacct': 'exit 0', 'pgrep': 'exit 1', 'salloc': 'printf "%s\\n" "$@" > "' + str(marker) + '"'}.items():
                 path = fake / name; path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o700)
             prefix = data['name'].upper().replace('-', '_')
             env = dict(os.environ, HPC_CORE_BIN=str(root / 'bin'), PATH=str(fake) + ':' + os.environ['PATH'],

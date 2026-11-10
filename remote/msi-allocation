@@ -13,6 +13,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import time
 
 SITE = 'msi'
 PREFIX = 'MSI'
@@ -51,7 +52,68 @@ def queue():
     return jobs
 
 
+TERMINAL = ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'OUT_OF_MEMORY',
+            'PREEMPTED', 'BOOT_FAIL', 'DEADLINE', 'REVOKED')
+# salloc reports the job ID as soon as Slurm accepts the request, before it starts.
+JOB_LINE = re.compile(r'salloc: (Pending|Granted) job allocation ([0-9]+)')
+CLOCK_SKEW = datetime.timedelta(minutes=5)
+
+
+def local_time(stamp):
+    """Convert a stored UTC timestamp to naive local time, as sacct prints and parses it."""
+    value = datetime.datetime.strptime(stamp[:19], '%Y-%m-%dT%H:%M:%S')
+    return value.replace(tzinfo=datetime.timezone.utc).astimezone().replace(tzinfo=None)
+
+
+def accounting_by_name(record):
+    """Jobs of this user named after the request and submitted after it was reserved."""
+    since = local_time(record['created_at']) - CLOCK_SKEW
+    rows = command(['sacct', '-nXP', '-u', os.environ['USER'], '--name=' + record['job_name'],
+                    '-S', since.strftime('%Y-%m-%dT%H:%M:%S'), '-E', 'now',
+                    '-o', 'JobID,JobName,State,ExitCode,Submit'])
+    matches = []
+    for row in rows.splitlines():
+        fields = row.split('|')
+        if len(fields) != 5 or fields[1] != record['job_name']:
+            continue
+        try:
+            submitted = datetime.datetime.strptime(fields[4], '%Y-%m-%dT%H:%M:%S')
+        except ValueError:
+            submitted = None  # Unparseable submit time: keep it as evidence, never drop it.
+        if submitted is None or submitted >= since:
+            matches.append(fields)
+    return matches
+
+
+def resolve_unbound(record):
+    """Resolve a request with no job ID that squeue does not list; never guess."""
+    name, user = record['job_name'], os.environ['USER']
+    check = ("sacct -X -u %s --name=%s -S %s -o JobID,JobName,State,Submit"
+             % (user, name, (local_time(record['created_at']) - CLOCK_SKEW).strftime('%Y-%m-%dT%H:%M:%S')))
+    rows = accounting_by_name(record)
+    if len(rows) > 1:
+        record.update(phase='submission_unknown', recovery='several jobs named ' + name + ' ('
+                      + ', '.join(row[0] for row in rows) + '); inspect them with: ' + check)
+    elif rows and rows[0][2].split()[0] in TERMINAL:
+        job, state, code = rows[0][0], rows[0][2], rows[0][3]
+        record.update(job_id=job, phase='terminal', slurm_state=state, exit_code=code)
+    elif rows:
+        record.update(phase='submission_unknown', slurm_state=rows[0][2],
+                      recovery='sacct shows job ' + rows[0][0] + ' ' + rows[0][2] + ' but squeue does not list it; '
+                      'check: squeue -j ' + rows[0][0] + ' and scontrol show job ' + rows[0][0])
+    elif record.get('holder_ended_at'):
+        # The holder ran salloc to completion and Slurm never accounted a job for it.
+        record.update(phase='terminal', slurm_state='NOT_SUBMITTED')
+    else:
+        record.update(phase='submission_unknown', recovery=(
+            'no job is queued or accounted yet and the holder has not finished; check the '
+            + record['identity'].get('target', 'allocation') + ' tmux window, holder pid '
+            + str(record.get('holder_pid')) + ' on ' + str(record.get('holder_host'))
+            + ', the log ' + record.get('log_path', '') + ' and: ' + check))
+
+
 def reconcile(record, jobs):
+    record.pop('recovery', None)
     candidates = [job for job in jobs if job['job_id'] == record['job_id']] if record.get('job_id') else [job for job in jobs if job['name'] == record['job_name']]
     if len(candidates) > 1:
         raise RuntimeError('Multiple jobs match request; inspect before continuing')
@@ -70,12 +132,14 @@ def reconcile(record, jobs):
         rows = command(['sacct', '-nXP', '-j', record['job_id'], '-o', 'JobID,State,ExitCode'])
         match = next((r.split('|') for r in rows.splitlines()
                       if r.split('|')[0] == record['job_id']), None)
-        if match and match[1].split()[0] in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'OUT_OF_MEMORY', 'PREEMPTED', 'BOOT_FAIL', 'DEADLINE', 'REVOKED'):
+        if match and match[1].split()[0] in TERMINAL:
             record.update(phase='terminal', slurm_state=match[1], exit_code=match[2])
         else:
-            record.update(phase='unknown', slurm_state=match[1] if match else 'UNKNOWN')
+            record.update(phase='unknown', slurm_state=match[1] if match else 'UNKNOWN',
+                          recovery='job ' + record['job_id'] + ' is neither queued nor terminal in accounting; '
+                          'check: sacct -X -j ' + record['job_id'] + ' -o JobID,State,End')
     else:
-        record['phase'] = 'submission_unknown'
+        resolve_unbound(record)
     record['observed_at'] = now()
     return record
 
@@ -245,7 +309,9 @@ def submit(root, args):
         record = reconcile(json.loads(previous.read_text()), jobs)
         atomic(previous, record)
         if record['phase'] != 'terminal':
-            raise RuntimeError('Existing allocation request ' + record['request_id'] + ' requires recovery; no submission')
+            raise RuntimeError('Existing allocation request ' + record['request_id'] + ' requires recovery ('
+                               + record['phase'] + (': ' + record['recovery'] if record.get('recovery') else '')
+                               + '); no submission')
     if jobs:
         raise RuntimeError('Existing jobs found; inspect and reuse with --job; no submission')
     name = spec.get('job_name') or 'hpc-' + SITE + '-' + hashlib.sha256(args.request.encode()).hexdigest()[:20]
@@ -278,6 +344,63 @@ def submit(root, args):
     return record
 
 
+def bind_submitted(root, path, job, granted):
+    """Store the job ID salloc printed; a conflicting stored ID is kept and reported by reconcile."""
+    try:
+        with (root / 'submit.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            record = json.loads(path.read_text())
+            if record.get('job_id') not in (None, job):
+                return
+            record['job_id'] = job
+            if record.get('phase') in ('holding', 'pending'):
+                record['phase'] = 'allocated' if granted else 'pending'
+            record['observed_at'] = now()
+            atomic(path, record)
+    except (OSError, ValueError) as error:
+        # Never break the holder's terminal; reconcile still finds the job by name.
+        sys.stderr.write(SITE + '-allocation: cannot record job ' + job + ': ' + str(error) + '\n')
+
+
+def managed_records(root):
+    for path in sorted(root.glob('*.json')):
+        yield path, json.loads(path.read_text())
+
+
+def adopt(root, job):
+    """Bind a queued job to its request through owner and comment, before it is cancelled."""
+    detail = command(['scontrol', 'show', 'job', job, '-o'])
+    if not re.search(r'\bUserId=' + re.escape(os.environ['USER']) + r'\(', detail):
+        raise RuntimeError('Slurm job owner mismatch')
+    comment = next((item[len('Comment='):] for item in detail.split() if item.startswith('Comment=')), '')
+    matches = [(path, record) for path, record in managed_records(root) if record.get('comment') == comment]
+    if len(matches) > 1:
+        raise RuntimeError('Several allocation requests carry the comment of job ' + job)
+    if not matches:
+        return []
+    path, record = matches[0]
+    if record.get('job_id') not in (None, job):
+        raise RuntimeError('Request ' + record['request_id'] + ' is bound to job ' + record['job_id'] + ', not ' + job)
+    record['job_id'] = job
+    record = reconcile(record, queue())
+    atomic(path, record)
+    return [record]
+
+
+def settle(root, job, attempts=5):
+    """Reconcile the requests bound to a job that was just cancelled."""
+    for attempt in range(attempts):
+        records = []
+        for path, record in managed_records(root):
+            if record.get('job_id') == job:
+                record = reconcile(record, queue())
+                atomic(path, record)
+                records.append(record)
+        if all(record['phase'] == 'terminal' for record in records) or attempt + 1 == attempts:
+            return records
+        time.sleep(2)  # Accounting can trail the queue by a few seconds.
+
+
 def hold(root, args):
     path = request_path(root, args.request)
     with (root / 'submit.lock').open('a') as lock:
@@ -287,12 +410,23 @@ def hold(root, args):
             raise RuntimeError('Allocation holder already started; refusing another submit')
         record.update(phase='holding', holder_host=socket.gethostname(), holder_pid=os.getpid(), holder_started_at=now())
         atomic(path, record)
+    seen = set()
+    tail = [b'']
     with open(record['log_path'], 'ab', buffering=0) as log:
         # Preserve a controlling terminal for srun --pty and the PSC bridge.
         # Redirecting the delegated process to a log silently disables --pty.
         def read_master(fd):
             data = os.read(fd, 65536)
             log.write(data)
+            # Record the job ID while it is still pending, so release and
+            # reconcile work for jobs that never start.
+            lines = (tail[0] + data).replace(b'\r', b'\n').split(b'\n')
+            tail[0] = lines.pop()[-4096:]
+            for line in lines:
+                match = JOB_LINE.search(line.decode('utf-8', 'replace'))
+                if match and match.group(2) not in seen:
+                    seen.add(match.group(2))
+                    bind_submitted(root, path, match.group(2), match.group(1) == 'Granted')
             return data
         status = pty.spawn(args.command, master_read=read_master)
         rc = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status)
@@ -322,8 +456,8 @@ def main():
             print(SITE + '-allocate: ' + str(error), file=sys.stderr)
             return 2
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['submit', 'hold', 'get', 'bind'])
-    parser.add_argument('request')
+    parser.add_argument('mode', choices=['submit', 'hold', 'get', 'bind', 'adopt', 'settle'])
+    parser.add_argument('request', nargs='?', default='')
     parser.add_argument('--socket'); parser.add_argument('--target')
     parser.add_argument('--field', action='append', default=[])
     parser.add_argument('--job'); parser.add_argument('--ready', action='store_true')
@@ -335,6 +469,11 @@ def main():
             return hold(root, args)
         with (root / 'submit.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            if args.mode in ('adopt', 'settle'):
+                if not args.job or not re.match(r'^[0-9]+$', args.job):
+                    raise ValueError(args.mode + ' requires --job ID')
+                print(json.dumps(adopt(root, args.job) if args.mode == 'adopt' else settle(root, args.job), sort_keys=True))
+                return 0
             if args.mode == 'submit':
                 if not args.socket or not args.target or not args.command:
                     raise ValueError('submit requires socket, target and command')

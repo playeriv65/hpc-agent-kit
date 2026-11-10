@@ -39,7 +39,14 @@ case "${1:-}" in
     detail="$(scontrol show job -o "$2")" || die 'cannot read job'
     [[ " $detail " == *" UserId=$USER("* && " $detail " == *" Comment=hpc-core:@SITE@:"* ]] || \
       die 'job was not allocated by this adapter for this user; not cancelled'
-    exec scancel "$2"
+    # Bind the job to its request first, so a job that never started still finishes it.
+    "$core_bin/@SITE@-allocation" adopt --job "$2" >/dev/null || die 'cannot bind job to its request; not cancelled'
+    scancel "$2"
+    for attempt in $(seq 60); do
+      [[ -n "$(squeue -h -j "$2" -o '%T' 2>/dev/null || true)" ]] || break
+      sleep 2
+    done
+    exec "$core_bin/@SITE@-allocation" settle --job "$2"
     ;;
   _allocate)
     shift

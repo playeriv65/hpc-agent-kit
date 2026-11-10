@@ -80,6 +80,10 @@ skip GPU/CUDA setup. Reuse exactly that ID and configuration after disconnects;
 `SITE-allocate allocation ID` reconciles the durable
 record with Slurm. Reservation or submission uncertainty never authorizes another
 ID. Inspect its log, named pane and scheduler evidence; preserve ambiguous records.
+The holder records the job ID as soon as `salloc` reports it, while the job is
+still pending. A record without a job ID is finished only when accounting shows
+exactly one terminal job with its unique name, or when `salloc` ended without
+creating one; otherwise new requests are refused with the exact check to run.
 READY is historical bootstrap evidence, not a current health guarantee.
 
 Use `SITE-allocate run --job JOB_ID --request TASK_ID --wait WINDOW -- COMMAND ...`

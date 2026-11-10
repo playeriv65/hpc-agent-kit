@@ -383,6 +383,9 @@ release_job() {
     [[ " $detail " == *" UserId=$USER("* ]] || die "job $requested_job does not belong to $USER"
     [[ " $detail " == *" Comment=hpc-core:psc:"* ]] || \
         die "job $requested_job was not allocated by psc-allocate; not cancelled"
+    # Bind the job to its request before cancelling, so the request can finish.
+    "${HPC_CORE_BIN:-$HOME/.local/bin}/psc-allocation" adopt --job "$requested_job" >/dev/null || \
+        die "cannot bind job $requested_job to its allocation request; not cancelled"
     if [[ "$save" == true && " $detail " == *" JobState=RUNNING "* ]]; then
         run_command --job "$requested_job" --request "release-save-$requested_job-$(date +%s)" --wait release-save -- \
             "${HPC_CORE_BIN:-$HOME/.local/bin}/psc-local-snapshot" save || \
@@ -395,6 +398,8 @@ release_job() {
         sleep 2
     done
     [[ -z "$state" ]] || die "job $requested_job is still $state after scancel"
+    "${HPC_CORE_BIN:-$HOME/.local/bin}/psc-allocation" settle --job "$requested_job" || \
+        die "job $requested_job was cancelled but its allocation request could not be reconciled"
     printf 'released job=%s\n' "$requested_job"
 }
 

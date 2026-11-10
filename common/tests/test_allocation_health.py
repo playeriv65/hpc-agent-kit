@@ -47,7 +47,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_replay_and_changed_configuration(self):
         self.reserve()
-        with patch.object(self.module, 'queue', return_value=[]), patch.object(self.module.subprocess, 'check_call') as dispatch:
+        with patch.object(self.module, 'queue', return_value=[]), patch.object(self.module, 'command', return_value=''), patch.object(self.module.subprocess, 'check_call') as dispatch:
             record = self.module.submit(self.root, self.args)
             self.assertEqual(record['phase'], 'submission_unknown')
             dispatch.assert_not_called()
@@ -57,7 +57,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_other_request_and_unknown_queue_fail_closed(self):
         self.reserve(); self.args.request = 'second'
-        with patch.object(self.module, 'queue', return_value=[]), self.assertRaisesRegex(RuntimeError, 'requires recovery'):
+        with patch.object(self.module, 'queue', return_value=[]), patch.object(self.module, 'command', return_value=''), self.assertRaisesRegex(RuntimeError, 'requires recovery'):
             self.module.submit(self.root, self.args)
         with patch.object(self.module, 'queue', side_effect=RuntimeError('scheduler offline')), self.assertRaisesRegex(RuntimeError, 'scheduler offline'):
             self.module.submit(self.root, self.args)
@@ -83,7 +83,7 @@ class AllocationTests(unittest.TestCase):
     def test_concurrent_cli_reserves_only_one_dispatch(self):
         fake = self.root / 'bin'; fake.mkdir()
         log = self.root / 'dispatch.log'
-        for name, body in {'squeue': 'exit 0', 'pgrep': 'exit 1', 'tmux':
+        for name, body in {'squeue': 'exit 0', 'sacct': 'exit 0', 'pgrep': 'exit 1', 'tmux':
             'if [[ "$*" == *display-message* ]]; then echo "bash|123"; else echo dispatch >> "' + str(log) + '"; fi'}.items():
             path = fake / name; path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o700)
         env = dict(os.environ, PATH=str(fake) + ':' + os.environ['PATH'], MSI_ALLOCATE_STATE_DIR=str(self.root / 'state'))
@@ -100,11 +100,145 @@ class AllocationTests(unittest.TestCase):
             'import os; assert all(os.isatty(fd) for fd in (0,1,2)); '
             'fd=os.open("/dev/tty",os.O_RDWR); os.close(fd); '
             'print("CONTROLLING_TTY_PASSED",flush=True); raise SystemExit(7)'])
-        with patch.object(self.module, 'queue', return_value=[]), patch.dict(os.environ, HPC_ALLOCATION_KEEP_PANE='0'):
+        with patch.object(self.module, 'queue', return_value=[]), patch.object(self.module, 'command', return_value=''), patch.dict(os.environ, HPC_ALLOCATION_KEEP_PANE='0'):
             self.assertEqual(self.module.hold(self.root, args), 7)
         self.assertIn(b'CONTROLLING_TTY_PASSED', (self.root / 'stable.log').read_bytes())
         self.assertEqual(json.loads((self.root / 'stable.json').read_text())['holder_exit_code'], 7)
 
+    def scheduler(self, detail='', accounting=''):
+        """Stub scontrol/sacct output by command name."""
+        def run(argv):
+            return {'scontrol': detail, 'sacct': accounting}[argv[0]]
+        return patch.object(self.module, 'command', side_effect=run)
+
+    def test_holder_records_pending_job_id_before_the_job_starts(self):
+        record = self.reserve()
+        path = self.root / 'stable.json'
+        # The child prints salloc's pending line, then waits until the holder has
+        # stored that job ID, as it would while the job sits in the queue.
+        child = ('import json,sys,time\n'
+                 'print("salloc: Pending job allocation 4242", flush=True)\n'
+                 'print("salloc: job 4242 queued and waiting for resources", flush=True)\n'
+                 'deadline = time.time() + 10\n'
+                 'while time.time() < deadline:\n'
+                 '    record = json.load(open(sys.argv[1]))\n'
+                 '    if record.get("job_id") == "4242":\n'
+                 '        sys.exit(0 if record["phase"] == "pending" else 4)\n'
+                 '    time.sleep(0.05)\n'
+                 'sys.exit(3)\n')
+        args = argparse.Namespace(request='stable', command=['python3', '-c', child, str(path)])
+        with patch.object(self.module, 'queue', return_value=[]), self.scheduler(accounting='4242|CANCELLED by 42|0:0'), \
+                patch.dict(os.environ, HPC_ALLOCATION_KEEP_PANE='0'):
+            self.assertEqual(self.module.hold(self.root, args), 0)
+        final = json.loads(path.read_text())
+        self.assertEqual((final['job_id'], final['phase'], final['slurm_state']), ('4242', 'terminal', 'CANCELLED by 42'))
+        self.assertEqual(final['comment'], record['comment'])
+
+    def test_holder_keeps_first_job_id(self):
+        self.reserve()
+        path = self.root / 'stable.json'
+        self.module.bind_submitted(self.root, path, '10', False)
+        self.module.bind_submitted(self.root, path, '11', True)
+        record = json.loads(path.read_text())
+        self.assertEqual((record['job_id'], record['phase']), ('10', 'dispatched'))
+
+    def test_release_while_pending_finishes_request(self):
+        record = self.reserve()
+        detail = 'JobId=77 UserId=' + os.environ['USER'] + '(42) JobState=PENDING Comment=' + record['comment']
+        pending = [dict(job_id='77', slurm_state='PENDING', node='', name=record['job_name'])]
+        with patch.object(self.module, 'queue', return_value=pending), self.scheduler(detail=detail):
+            adopted = self.module.adopt(self.root, '77')
+        self.assertEqual((adopted[0]['job_id'], adopted[0]['phase']), ('77', 'pending'))
+        with patch.object(self.module, 'queue', return_value=[]), self.scheduler(accounting='77|CANCELLED by 42|0:0'):
+            settled = self.module.settle(self.root, '77')
+        self.assertEqual((settled[0]['phase'], settled[0]['slurm_state']), ('terminal', 'CANCELLED by 42'))
+        self.assertEqual(json.loads((self.root / 'stable.json').read_text())['phase'], 'terminal')
+        with patch.object(self.module, 'queue', return_value=[]), self.scheduler(detail=detail.replace(record['comment'], 'hpc-core:msi:other')):
+            self.assertEqual(self.module.adopt(self.root, '78'), [])
+        with patch.object(self.module, 'queue', return_value=[]), self.scheduler(detail=detail.replace('JobId=77', 'JobId=79')), \
+                self.assertRaisesRegex(RuntimeError, 'bound to job 77, not 79'):
+            self.module.adopt(self.root, '79')
+
+    @unittest.skipUnless((ROOT / 'remote/msi-allocate').exists(), 'the MSI site adapter is not part of this tree')
+    def test_release_command_finds_and_finishes_pending_job(self):
+        state = self.root / 'state'; allocations = state / 'allocations'; allocations.mkdir(parents=True)
+        with patch.object(self.module, 'queue', return_value=[]), patch.object(self.module, 'command', return_value='bash|123'), \
+                patch.object(self.module.subprocess, 'run', return_value=argparse.Namespace(returncode=1)), \
+                patch.object(self.module.subprocess, 'check_call'):
+            record = self.module.submit(allocations, self.args)
+        fake = self.root / 'bin'; fake.mkdir()
+        cancelled = self.root / 'cancelled'
+        stubs = {
+            'msi-allocation': 'exec python3 "%s" "$@"' % (ROOT / 'remote/msi-allocation'),
+            'squeue': 'if [[ -e "%s" ]]; then exit 0; fi\n'
+                      'case "$*" in *"%%i|%%k"*) echo "77|%s" ;; *"%%i|%%T"*) echo "77|PENDING|%s|" ;; *) echo PENDING ;; esac'
+                      % (cancelled, record['comment'], record['job_name']),
+            'scontrol': 'echo "JobId=77 JobName=%s UserId=$USER(42) JobState=PENDING Comment=%s"' % (record['job_name'], record['comment']),
+            'scancel': '[[ "$*" == 77 ]] && touch "%s"' % cancelled,
+            'sacct': 'echo "77|CANCELLED by 42|0:0"',
+        }
+        for name, body in stubs.items():
+            path = fake / name; path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o700)
+        env = dict(os.environ, PATH=str(fake) + ':' + os.environ['PATH'], HPC_CORE_BIN=str(fake),
+                   MSI_ALLOCATE_STATE_DIR=str(state), MSI_ALLOCATE_CONFIG=str(self.root / 'absent.env'))
+        result = subprocess.run(['bash', str(ROOT / 'remote/msi-allocate'), 'release', '--no-save'], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('released job=77', result.stdout)
+        final = json.loads((allocations / 'stable.json').read_text())
+        self.assertEqual((final['job_id'], final['phase']), ('77', 'terminal'))
+
+    def test_unbound_record_terminal_in_accounting_is_finished(self):
+        record = self.reserve()
+        with self.scheduler(accounting='900|' + record['job_name'] + '|CANCELLED by 42|0:0|2099-01-01T00:00:00'):
+            restored = self.module.reconcile(record, [])
+        self.assertEqual((restored['job_id'], restored['phase'], restored['slurm_state']), ('900', 'terminal', 'CANCELLED by 42'))
+        self.module.atomic(self.root / 'stable.json', restored)
+        self.args.request = 'next'
+        with patch.object(self.module, 'queue', return_value=[]), \
+                patch.object(self.module.subprocess, 'run', return_value=argparse.Namespace(returncode=1)), \
+                patch.object(self.module.subprocess, 'check_call'), \
+                patch.object(self.module, 'command', side_effect=lambda argv: 'bash|123' if argv[0] == 'tmux' else '900|CANCELLED by 42|0:0'):
+            self.assertEqual(self.module.submit(self.root, self.args)['phase'], 'dispatched')
+
+    def test_unbound_record_still_pending_is_adopted_by_name(self):
+        record = self.reserve()
+        jobs = [dict(job_id='901', slurm_state='PENDING', node='', name=record['job_name'])]
+        detail = 'JobId=901 UserId=' + os.environ['USER'] + '(42) Comment=' + record['comment']
+        with self.scheduler(detail=detail):
+            restored = self.module.reconcile(record, jobs)
+        self.assertEqual((restored['job_id'], restored['phase']), ('901', 'pending'))
+
+    def test_unbound_record_with_ambiguous_evidence_keeps_refusing(self):
+        name = self.reserve()['job_name']
+        cases = {
+            'accounted but not queued': ('902|' + name + '|PENDING|0:0|2099-01-01T00:00:00', 'squeue -j 902'),
+            'several jobs': ('903|' + name + '|CANCELLED|0:0|2099-01-01T00:00:00\n904|' + name + '|COMPLETED|0:0|2099-01-01T00:00:00',
+                             'several jobs named ' + name + r' \(903, 904\)'),
+            'holder not finished': ('', 'holder has not finished'),
+            'earlier job with the same name': ('905|' + name + '|COMPLETED|0:0|2000-01-01T00:00:00', 'holder has not finished'),
+        }
+        for label, (accounting, message) in cases.items():
+            with self.subTest(label):
+                record = json.loads((self.root / 'stable.json').read_text())
+                with self.scheduler(accounting=accounting):
+                    restored = self.module.reconcile(record, [])
+                self.assertEqual(restored['phase'], 'submission_unknown')
+                self.assertIsNone(restored['job_id'])
+                self.assertRegex(restored['recovery'], message)
+                self.args.request = 'next'
+                with patch.object(self.module, 'queue', return_value=[]), self.scheduler(accounting=accounting), \
+                        self.assertRaisesRegex(RuntimeError, r'requires recovery \(submission_unknown: .*' + message):
+                    self.module.submit(self.root, self.args)
+                self.assertFalse((self.root / 'next.json').exists())
+                self.args.request = 'stable'
+
+    def test_unbound_record_without_job_after_holder_ended_is_finished(self):
+        record = self.reserve(); record.update(holder_started_at='x', holder_ended_at='y', holder_exit_code=1)
+        with self.scheduler(accounting=''):
+            restored = self.module.reconcile(record, [])
+        self.assertEqual((restored['phase'], restored['slurm_state'], restored['job_id']), ('terminal', 'NOT_SUBMITTED', None))
+        self.assertNotIn('recovery', restored)
 
 SITE_CONFIG = {
     'MSI_ALLOCATE_ACCOUNT': 'lab',

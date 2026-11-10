@@ -12,6 +12,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import types
 
 
 def atomic(path, data, mode=0o600):
@@ -55,7 +56,18 @@ def retired_path(home, site, name):
     return home / name
 
 
-def check_allocations(home, site, state):
+def release_rules(payload):
+    """Load the release's own allocation helper, so its reconcile rules decide what is finished."""
+    name = 'bin/' + payload['site'] + '-allocation'
+    if name not in payload.get('files', {}): return None
+    data = base64.b64decode(payload['files'][name])
+    if hashlib.sha256(data).hexdigest() != payload['hashes'][name]: raise RuntimeError('Hash mismatch: ' + name)
+    module = types.ModuleType('hpc_release_allocation')
+    exec(compile(data.decode(), name, 'exec'), module.__dict__)
+    return module
+
+
+def check_allocations(home, site, state, rules=None):
     for path in (state / 'allocations').glob('*.json'):
         record = json.loads(path.read_text())
         if path.name == 'hpc-deployment-guard.json' and record.get('deployment_guard') and record.get('cluster') == site:
@@ -63,6 +75,12 @@ def check_allocations(home, site, state):
             if journal.exists() and record.get('backup') == json.loads(journal.read_text()).get('backup'):
                 continue
         if record.get('phase') == 'terminal': continue
+        if rules is not None:
+            # The queue is empty here; observe without rewriting the record.
+            observed = rules.reconcile(dict(record), [])
+            if observed['phase'] == 'terminal': continue
+            raise RuntimeError('Unresolved allocation request: ' + str(path) + ' (' + observed['phase']
+                               + (': ' + observed['recovery'] if observed.get('recovery') else '') + ')')
         if not record.get('job_id'): raise RuntimeError('Unresolved allocation request: ' + str(path))
         rows = subprocess.check_output(['sacct', '-nXP', '-j', record['job_id'], '-o', 'JobID,State'],
                                        universal_newlines=True, timeout=30)
@@ -73,16 +91,16 @@ def check_allocations(home, site, state):
             raise RuntimeError('Allocation termination is unconfirmed: ' + str(path))
 
 
-def quiescent(home, site, retire=()):
+def quiescent(home, site, retire=(), rules=None):
     queue = subprocess.check_output(['squeue', '-h', '-u', os.environ['USER'], '-o', '%i|%T'],
                                     universal_newlines=True, timeout=30).strip()
     if queue: raise RuntimeError('Live jobs exist; deployment refused: ' + queue)
-    check_allocations(home, site, home / ('.local/state/' + site + '-allocate'))
+    check_allocations(home, site, home / ('.local/state/' + site + '-allocate'), rules)
     for name in retire:
         path = retired_path(home, site, name)
         if not (path / 'allocations').is_dir(): continue
         # A retired state directory must hold no live reservation or deployment.
-        check_allocations(home, site, path)
+        check_allocations(home, site, path, rules)
         journal = path / 'deployment.json'
         if journal.exists() and json.loads(journal.read_text()).get('phase') in ('installing', 'rolling_back', 'rollback_failed'):
             raise RuntimeError('Incomplete deployment in retired state: ' + str(journal))
@@ -129,7 +147,7 @@ def install(payload):
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     retire = list(payload.get('retire', []))
     for name in retire: retired_path(home, site, name)
-    quiescent(home, site, retire)
+    quiescent(home, site, retire, release_rules(payload))
     journal = state / 'deployment.json'
     archive = os.path.expandvars(payload.get('archive', ''))
     if not archive:

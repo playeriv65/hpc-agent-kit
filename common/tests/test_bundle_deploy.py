@@ -45,6 +45,28 @@ class DeployTests(unittest.TestCase):
         self.target = self.home / '.local/bin/test-lab-allocate'; self.target.parent.mkdir(parents=True)
         self.target.write_bytes(b'old release'); self.target.chmod(0o750)
 
+    def test_release_allocation_rules_decide_unbound_requests(self):
+        body = (ROOT / 'common/allocation.py').read_text().replace('@SITE@', 'test-lab').replace('@PREFIX@', 'TEST_LAB').encode()
+        payload = json.loads(json.dumps(self.payload))
+        payload['files']['bin/test-lab-allocation'] = base64.b64encode(body).decode()
+        payload['hashes']['bin/test-lab-allocation'] = hashlib.sha256(body).hexdigest()
+        allocations = self.home / '.local/state/test-lab-allocate/allocations'; allocations.mkdir(parents=True)
+        self.target.write_bytes(b'old release')
+        record = dict(request_id='old', job_id=None, job_name='hpc-test-lab-old', comment='hpc-core:test-lab:old',
+                      phase='submission_unknown', created_at='2026-01-01T00:00:00+00:00', identity={})
+        (allocations / 'old.json').write_text(json.dumps(record))
+        accounting = self.fake / 'sacct'
+        accounting.write_text('#!/bin/bash\necho "55|hpc-test-lab-old|PENDING|0:0|2099-01-01T00:00:00"\n'); accounting.chmod(0o700)
+        refused = self.run_install(payload)
+        self.assertNotEqual(refused.returncode, 0, refused.stdout)
+        self.assertIn('Unresolved allocation request', refused.stdout); self.assertIn('squeue -j 55', refused.stdout)
+        self.assertEqual(self.target.read_bytes(), b'old release')
+        accounting.write_text('#!/bin/bash\necho "55|hpc-test-lab-old|CANCELLED by 1|0:0|2099-01-01T00:00:00"\n')
+        committed = self.run_install(payload)
+        self.assertEqual(committed.returncode, 0, committed.stdout)
+        # The installer only observes; the installed allocator rewrites the record later.
+        self.assertEqual(json.loads((allocations / 'old.json').read_text()), record)
+
     def run_install(self, payload=None, injection=''):
         payload = payload or self.payload
         source = deploy.REMOTE
@@ -98,7 +120,7 @@ def atomic(path, data, mode=0o600):
         journal.rename(hidden)
         try:
             args = argparse.Namespace(request='fresh', field=[], command=['/bin/true'], socket='test', target='test')
-            with patch.object(allocator, 'queue', return_value=[]):
+            with patch.object(allocator, 'queue', return_value=[]), patch.object(allocator, 'command', return_value=''):
                 with self.assertRaisesRegex(RuntimeError, 'requires recovery'):
                     allocator.submit(state / 'allocations', args)
         finally: hidden.rename(journal)

@@ -22,7 +22,8 @@ grants. Validate compute capabilities on compute, not only on login nodes.
   partitions, limits and defaults come from the site's `allocate.env`. After
   bootstrap, route work through `SITE-allocate run`; do not create extra steps.
   End a job with `SITE-allocate release --job ID`, which checks owner and request
-  identity before cancelling.
+  identity before cancelling and then finishes the request, also for a job that
+  never left the queue.
 - Persist an allocation request ID before submitting. Replay that ID with the
   same parameters after a disconnect. An unknown scheduler result or ambiguous
   reservation must not produce another allocation or deletion of its record.

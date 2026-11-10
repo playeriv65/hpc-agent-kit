@@ -34,7 +34,7 @@
     "default_gpu": "v100",
     "local_scratch": "100G",
     "cpu": {
-      "partition": "interactive",
+      "partition": "msismall",
       "qos": "",
       "cores": 8,
       "max_cores": 128,
